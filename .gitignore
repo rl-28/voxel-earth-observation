@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+*.tif
+*.tiff
+*.jp2
+.env
+
+# temporary processing files
+temp/
+tmp/
+*.tmp
+
+# generated outputs
+output/
+outputs/
+
+# model artifacts
+*.pt
+*.pth
+*.h5
+
+# logs
+*.log
+logs/

@@ -1,0 +1,5 @@
+numpy
+rasterio
+PyWavelets
+pystac-client
+pytest
