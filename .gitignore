@@ -18,6 +18,10 @@ tmp/
 output/
 outputs/
 
+# synthetic datasets
+data/synthetic/*.npy
+data/synthetic/metadata.json
+
 # model artifacts
 *.pt
 *.pth

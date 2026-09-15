@@ -142,18 +142,15 @@ Float32
 Module 2
 ```
 
-## SYNTHETIC DATA STRATEGY
-Synthetic data will be used for independent development.
-Target synthetic baseline:
-- 100 mock tiles
-- 13 spectral bands
-- 256×256 spatial dimensions
-- Float32 representation
+## PHASE 2 — SYNTHETIC DEVELOPMENT DATASET
+A synthetic dataset is established to provide structured input for downstream Module 2 and Module 3 development before real satellite ingestion is fully implemented.
 
-Each tile:
-(256,256,13)
-
-This allows Shreeya and Riya to develop independently while Arya develops the real ingestion pipeline.
+- **Purpose**: Development baseline for hyperspectral/geospatial pipelines.
+- **Dataset Size**: 100 mock tiles.
+- **Data Properties**: 13 spectral bands, 256 × 256 spatial dimensions, `float32` representation.
+- **Randomization**: Deterministic seed (default 42) ensures reproducible tile generation.
+- **Git Strategy**: This is a development-only dataset; generated binary tiles are strictly ignored from Git tracking.
+- **Usage**: Allows downstream modules to begin integration testing against the strict spatial-spectral data contract.
 
 ## DATA DIRECTORIES
 - `data/raw/`

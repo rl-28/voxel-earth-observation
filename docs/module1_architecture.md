@@ -77,7 +77,23 @@ Validation
 Module 2
 ```
 
-## 17. Module 2 Integration
+## 17. Synthetic Dataset Generation
+To allow for concurrent downstream development, a deterministic synthetic dataset generator creates mock data strictly adhering to the spatial-spectral contract.
+
+Workflow:
+```text
+Synthetic Generator
+        ↓
+100 × (256,256,13)
+        ↓
+Data Contract Validation
+        ↓
+data/synthetic/
+        ↓
+Module 2 / Module 3 development
+```
+
+## 18. Module 2 Integration
 Data Flow:
 ```text
 Raw Satellite Data
