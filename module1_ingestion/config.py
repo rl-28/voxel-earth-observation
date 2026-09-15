@@ -7,6 +7,14 @@ Centralizes paths, parameters, and constants.
 import numpy as np
 from pathlib import Path
 
+import os
+
+# STAC Configuration
+COPERNICUS_STAC_URL = os.getenv("COPERNICUS_STAC_URL", "https://stac.dataspace.copernicus.eu/v1/")
+SENTINEL_2_L2A_COLLECTION = "sentinel-2-l2a"
+DEFAULT_CLOUD_COVER = 20.0
+STAC_TIMEOUT_SEC = 30
+
 # Important processing constants
 TILE_SIZE = 256
 NUM_BANDS = 13

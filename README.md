@@ -142,6 +142,15 @@ Float32
 Module 2
 ```
 
+## PHASE 3 — STAC DOWNLOADER
+Programmatic STAC-based ingestion of Sentinel-2 Level-2A surface reflectance data.
+- **Provider**: Copernicus Data Space Ecosystem (configurable STAC endpoint).
+- **Collection**: `sentinel-2-l2a`.
+- **Search Capabilities**: Configurable AOI (GeoJSON), date interval, and cloud-cover threshold.
+- **Asset Download**: Raw asset download functionality with memory-disciplined streaming.
+- **Separation of Concerns**: The downloader discovers and downloads raw data; it does NOT crop, tile, or produce the (256, 256, 13) spatial tensor (handled by downstream preprocessing).
+- **Security**: Credentials (if required) are injected via environment variables and never stored in Git.
+
 ## PHASE 2 — SYNTHETIC DEVELOPMENT DATASET
 A synthetic dataset is established to provide structured input for downstream Module 2 and Module 3 development before real satellite ingestion is fully implemented.
 

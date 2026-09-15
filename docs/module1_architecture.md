@@ -14,6 +14,24 @@ A normalized spatial-spectral tensor of shape `(256, 256, 13)` and dtype `float3
 
 ## 5. STAC Ingestion
 Query, search, and controlled download of satellite scenes, preserving essential metadata.
+The STAC downloader specifically discovers and downloads raw assets but **does NOT produce the final (256,256,13) tensor**.
+
+Data Flow:
+```text
+STAC Catalog
+     ↓
+Search
+     ↓
+STAC Item
+     ↓
+Asset Discovery
+     ↓
+Raw Asset Download
+     ↓
+data/raw/
+     ↓
+Tile Processor
+```
 
 ## 6. GeoTIFF Processing
 Reading raster data, handling invalid/NoData values, and basic imagery checks.
