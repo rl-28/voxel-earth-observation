@@ -45,7 +45,39 @@ Tile-based block processing and avoiding redundant array copies to adhere to the
 ## 15. Testing
 Comprehensive unit and integration testing of the STAC interface, preprocessing steps, and interface contracts.
 
-## 16. Module 2 Integration
+## 16. Spatial-Spectral Data Contract
+This contract exists to enforce strict interface boundaries between modules, ensuring Module 2 receives data in a guaranteed format.
+
+- **Expected Shape**: (256, 256, 13)
+- **Axis Order**: (height, width, spectral_bands)
+- **Dtype**: `numpy.float32`
+- **Finite-Value Requirement**: All output values must be finite. No NaN or Inf values are allowed.
+
+**Normalization Expectations**: 
+Z-score normalization `Z = (X - mean) / standard_deviation` is expected to be applied consistently across spectral data to stabilize downstream learning. The implementation must handle zero standard deviation cases to avoid generating NaN/Inf values.
+
+**Validation**: 
+Explicit validation occurs before handoff to Module 2 to prevent propagation of malformed tensors. Module 1 must ultimately produce a valid `(256, 256, 13), float32` tensor.
+
+```text
+Raw GeoTIFF / satellite data
+        ↓
+Spatial processing
+        ↓
+256 × 256 tile
+        ↓
+13 spectral bands
+        ↓
+Normalization
+        ↓
+NumPy float32 tensor
+        ↓
+Validation
+        ↓
+Module 2
+```
+
+## 17. Module 2 Integration
 Data Flow:
 ```text
 Raw Satellite Data

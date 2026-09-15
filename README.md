@@ -84,6 +84,10 @@ Each member works on their own branch, commits only their module changes, keeps 
 - **Type**: NumPy ndarray
 - **dtype**: float32
 - **Shape**: (256, 256, 13)
+- **Axis Order**: (height, width, spectral_bands)
+- **Values**: All values must be finite (no NaN or Inf).
+
+This spatial-spectral data contract is the fixed interface between Module 1 and Module 2. Validation is explicitly enforced before handoff.
 
 ### MODULE 2 → MODULE 3:
 - **Type**: Binary mask
