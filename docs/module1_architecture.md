@@ -125,6 +125,13 @@ Provides physically motivated reflection and contamination suppression for surfa
 
 **Validation**: 
 Explicit validation occurs before handoff to Module 2 to prevent propagation of malformed tensors. Module 1 must ultimately produce a valid `(256, 256, 13), float32` tensor. The mapping of the 13th channel is a project-level specification decision and must not be fabricated by the ingestion pipeline.
+
+## 12. End-to-End Pipeline Integration (Phase 8)
+An orchestration layer (`module1_ingestion/pipeline.py`) unifies the ingestion, tiling, normalization, wavelet, and filtering modules into a single, cohesive processing sequence.
+- **Pipeline Flow**: Ingestion -> CRS/Resolution Alignment -> 256x256 Tiling -> Valid Mask Extraction -> Z-Score Normalization -> 3D-DWT -> Albedo/Reflection Filtering -> Final Validation.
+- **12/13-Band Interoperability**: Adapts fluidly to both 12-band real intermediate datasets and the 13-channel project specification, routing to appropriate validators.
+- **Memory Management**: Yields processed tiles sequentially via a generator rather than materializing full processed scenes in RAM, strictly adhering to the 16 GB hardware guardrail.
+- **Diagnostics & Result Structure**: Returns a `Module1Result` containing the filtered spatial tensor alongside comprehensive diagnostic timing, contamination statistics, masks, and metadata.
 > - **L1C / MSI**: 13 spectral bands including B10.
 > - **L2A**: 12 surface-reflectance spectral bands because B10 is excluded (no bottom-of-atmosphere information).
 > 

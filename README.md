@@ -199,6 +199,13 @@ Applies physically motivated reflection and contamination suppression to surface
 - **Non-Destructive Masking**: Contaminated pixels are explicitly masked using `FILTER_FILL_VALUE`, while spatial scale `(256, 256, C)` is strictly preserved. Generates comprehensive `AlbedoFilterResult` diagnostics.
 - **Scale-Aware Thresholds**: Dynamically applies appropriate thresholds based on whether the input is raw reflectance or Z-score normalized data.
 
+## PHASE 8 — MODULE 1 END-TO-END PIPELINE INTEGRATION
+Orchestrates the individual Module 1 components into a clean, testable processing pipeline:
+- **Conceptual Flow**: GeoTIFF Ingestion -> CRS/Resolution Alignment -> 256x256 Tiling -> Valid Mask Extraction -> Z-Score Normalization -> 3D-DWT -> Albedo/Reflection Filtering -> Final Validation.
+- **12/13-Band Support**: Explicitly handles both the real Sentinel-2 12-band intermediate data and the project's final 13-channel tensor contract, safely verifying dimensions and numeric bounds without hallucinating bands.
+- **Rich Diagnostics**: Outputs a comprehensive `Module1Result` preserving all upstream statistics, contamination masks, processing timings, and structural metadata.
+- **Tile-Oriented Memory Model**: Processes imagery incrementally tile-by-tile via a generator API to strictly respect the 16 GB hardware guardrail.
+
 ## PHASE 2 — SYNTHETIC DEVELOPMENT DATASET
 A synthetic dataset is established to provide structured input for downstream Module 2 and Module 3 development before real satellite ingestion is fully implemented.
 
@@ -285,5 +292,5 @@ The team/faculty should clarify the intended interpretation before final evaluat
 - Phase 5 — Normalization: **COMPLETED**
 - Phase 6 — 3D-DWT: **COMPLETED**
 - Phase 7 — Cloud & Shadow Masking: **COMPLETED**
-- Phase 8 — Albedo Filtering: **COMPLETED** (Integrated into Phase 7)
+- Phase 8 — Module 1 Pipeline Integration: **COMPLETED**
 - Phase 9 — Final Integration: PENDING
