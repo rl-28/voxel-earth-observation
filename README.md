@@ -213,6 +213,13 @@ Establishes the robust data pipeline required to prepare geographically separate
 - **Projection Verification**: Inspects and records geospatial metadata (CRS, bounds, transform) for every tile, verifying that it aligns with the expected output spatial grid.
 - **CLI and Config**: Provides a reusable `module1_ingestion.evaluation_pipeline` to process evaluation regions without fabricating exact AOIs or coordinates (project team provides actual sources).
 
+## PHASE 10 — STREAMLIT FRONTEND INTEGRATION
+Provides a clean, interactive Streamlit frontend (`app.py`) exposing the full Module 1 pipeline to the end-user.
+- **Input Modes**: Supports local `.zip` uploads containing Sentinel-2 GeoTIFFs, as well as configured evaluation region (Ext SR / Ext WB) execution.
+- **Processing Diagnostics**: Displays real-time, interactive expandable diagnostics including contract validation type, resulting shapes, masking stats, and timing information.
+- **Module 2 Handoff Awareness**: Explicitly surfaces the unresolved 12-channel vs 13-channel project specification gap, warning the user if the intermediate 12-channel output needs future projection prior to Module 2 integration.
+- **Startup**: `streamlit run app.py`
+
 ## PHASE 2 — SYNTHETIC DEVELOPMENT DATASET
 A synthetic dataset is established to provide structured input for downstream Module 2 and Module 3 development before real satellite ingestion is fully implemented.
 
@@ -301,3 +308,4 @@ The team/faculty should clarify the intended interpretation before final evaluat
 - Phase 7 — Cloud & Shadow Masking: **COMPLETED**
 - Phase 8 — Module 1 Pipeline Integration: **COMPLETED**
 - Phase 9 — Out-of-Domain Evaluation Data Pipeline: **COMPLETED**
+- Phase 10 — Streamlit Frontend/Backend Integration: **COMPLETED**

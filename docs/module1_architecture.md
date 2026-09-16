@@ -139,6 +139,12 @@ Establishes the infrastructure to securely generate evaluation datasets separate
 - **Unified Processing**: Strictly processes evaluation data through the identical Module 1 processing pipeline (Z-Score, DWT, Filtering, Validation).
 - **Projection Verification**: For each generated evaluation tile, validates and exports crucial projection metadata (CRS, Affine Transforms, geographical bounds), fulfilling Phase 9 tracking requirements.
 - **Data Isolation**: Ensures output artifacts and deterministic metadata manifests are written strictly to `data/evaluation/` subdirectories to prevent any test-set leakage.
+
+## 14. Streamlit Frontend/Backend Integration (Phase 10)
+Connects the scientific backend to an interactive `app.py` Streamlit entry point.
+- **Input Methods**: Supports both `.zip` uploads of local Sentinel-2 directories and directly configurable evaluation regions, ensuring no arbitrary dummy data is generated.
+- **Diagnostic Transparency**: Translates backend `Module1Result` arrays into visually clean warnings and expandable JSON diagnostics, without directly mutating the core data arrays in the frontend layer.
+- **Contract Fidelity Enforcement**: Explicitly flags if processing results in 12 channels instead of the target 13, pushing resolution of the mismatched spatial-spectral final contract squarely to the Module 1 -> Module 2 interface.
 > - **L1C / MSI**: 13 spectral bands including B10.
 > - **L2A**: 12 surface-reflectance spectral bands because B10 is excluded (no bottom-of-atmosphere information).
 > 
