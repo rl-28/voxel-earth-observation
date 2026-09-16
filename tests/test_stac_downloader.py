@@ -21,6 +21,28 @@ def test_config_loaded():
     assert provider.endpoint_url is not None
     assert SENTINEL_2_L2A_COLLECTION == "sentinel-2-l2a"
 
+def test_l2a_band_mapping():
+    from module1_ingestion.config import SENTINEL_2_L2A_SPECTRAL_BANDS, NUM_BANDS
+    
+    # 1. B10 is NOT included
+    assert "B10" not in SENTINEL_2_L2A_SPECTRAL_BANDS
+    
+    # 2. Exactly 12 L2A spectral bands
+    assert len(SENTINEL_2_L2A_SPECTRAL_BANDS) == 12
+    
+    # 3. B8A is included
+    assert "B8A" in SENTINEL_2_L2A_SPECTRAL_BANDS
+    
+    # 4. B11 and B12 are included
+    assert "B11" in SENTINEL_2_L2A_SPECTRAL_BANDS
+    assert "B12" in SENTINEL_2_L2A_SPECTRAL_BANDS
+    
+    # 5. Project NUM_BANDS remains 13
+    assert NUM_BANDS == 13
+    
+    # 6. Downloader distinguishes SOURCE and TARGET (by having 12 source bands != 13 target)
+    assert len(SENTINEL_2_L2A_SPECTRAL_BANDS) != NUM_BANDS
+
 def test_aoi_validation_fails_on_invalid():
     provider = CopernicusSTACProvider()
     with pytest.raises(ValueError, match="AOI must be a valid GeoJSON"):

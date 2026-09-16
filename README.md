@@ -151,6 +151,18 @@ Programmatic STAC-based ingestion of Sentinel-2 Level-2A surface reflectance dat
 - **Separation of Concerns**: The downloader discovers and downloads raw data; it does NOT crop, tile, or produce the (256, 256, 13) spatial tensor (handled by downstream preprocessing).
 - **Security**: Credentials (if required) are injected via environment variables and never stored in Git.
 
+> [!WARNING]
+> Sentinel-2 L2A provides 12 surface-reflectance spectral bands. The project interface currently requires 13 channels. The mapping of the 13th channel is a project-level specification decision and must not be fabricated by the ingestion pipeline.
+> - **L1C / MSI**: 13 spectral bands including B10.
+> - **L2A**: 12 surface-reflectance spectral bands because B10 is excluded.
+
+**Phase 3 Status**:
+- STAC ingestion = implemented
+- Copernicus L2A discovery = implemented
+- L2A asset discovery = implemented
+- 12-band L2A spectral mapping = verified
+- 13-channel final mapping = pending project clarification
+
 ## PHASE 2 — SYNTHETIC DEVELOPMENT DATASET
 A synthetic dataset is established to provide structured input for downstream Module 2 and Module 3 development before real satellite ingestion is fully implemented.
 

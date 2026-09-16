@@ -92,8 +92,11 @@ class CopernicusSTACProvider(STACProvider):
     def get_item_assets(self, item: Any) -> Dict[str, Any]:
         """Discovers available assets for a STAC item."""
         # MAPPING NOTE:
-        # The project requires 13 spectral bands. Native Sentinel-2 L2A assets 
-        # typically include B01, B02, B03, B04, B05, B06, B07, B08, B8A, B09, B11, B12, and SCL.
+        # Sentinel-2 L2A provides 12 surface-reflectance spectral bands.
+        # The project interface currently requires 13 channels. The mapping
+        # of the 13th channel is a project-level specification decision and
+        # must not be fabricated by the ingestion pipeline. 
+        # The 13th channel mapping remains: Pending project-level specification clarification.
         # We discover all available assets here. Mapping to the explicit 13-band stack
         # is deferred to the tile processing phase.
         return item.assets
