@@ -102,6 +102,16 @@ Independent statistical normalization ($Z = (X - \mu) / \sigma$) applied to each
 - **Constant Bands**: Zero-variance channels gracefully map to `0.0` to preserve the finite output contract.
 - **Flexibility**: Uncoupled from band counts, supporting both the intermediate 12-band real data and final 13-band tensors.
 
+## 10. 3D Discrete Wavelet Transform (3D-DWT)
+Implements true 3D spatial-spectral wavelet decomposition via PyWavelets to compress spectral bands and capture edge/textural information without discarding spatial scale.
+- **Wavelet Used**: `db1` (Haar) as a lightweight, deterministic baseline.
+- **Decomposition**: `level=1` 3D DWT across Height, Width, and Spectral axes (`H x W x C`), producing approximation and detail coefficients.
+- **Boundary Mode**: `symmetric` extension handles image borders smoothly.
+- **Reconstruction & Spatial Preservation**: The API exposes `.reconstruct_approximation()` and `.reconstruct_full()` which invert the transform to restore the original `(256, 256, C)` spatial dimensions. Discarded frequencies are correctly zeroed prior to inversion.
+- **Compression vs. Transform**: Currently implemented as a lossless, mathematically exact transform. The "compression" occurs downstream if subbands are discarded.
+- **Agnostic Representation**: Generically processes both 12-band and 13-band datasets.
+- **Validation**: Strict checks block NaN/Inf inputs and verify near-zero reconstruction error.
+
 **Validation**: 
 Explicit validation occurs before handoff to Module 2 to prevent propagation of malformed tensors. Module 1 must ultimately produce a valid `(256, 256, 13), float32` tensor. The mapping of the 13th channel is a project-level specification decision and must not be fabricated by the ingestion pipeline.
 > - **L1C / MSI**: 13 spectral bands including B10.

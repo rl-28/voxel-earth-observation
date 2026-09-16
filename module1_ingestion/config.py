@@ -26,6 +26,13 @@ NORMALIZATION_FILL_VALUE = 0.0
 DEFAULT_CLOUD_COVER = 20.0
 STAC_TIMEOUT_SEC = 30
 
+# ---------------------------------------------------------
+# Phase 6: Wavelet Constants
+# ---------------------------------------------------------
+WAVELET_NAME = "db1"
+WAVELET_LEVEL = 1
+WAVELET_MODE = "symmetric"
+
 # Important processing constants
 TILE_SIZE = 256
 NUM_BANDS = 13

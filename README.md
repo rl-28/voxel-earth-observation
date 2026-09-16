@@ -182,6 +182,14 @@ Provides mathematically robust statistical standardisation across the spatial-sp
 - **Output Contract**: Results are always finite, cast precisely to `float32`, returning an explicitly safe tensor and validity mask for downstream consumption.
 - **Multi-Shape Support**: Agnostically supports both the 12-band real Sentinel-2 intermediate data and the final 13-channel project interface.
 
+## PHASE 6 — 3D DISCRETE WAVELET TRANSFORM (3D-DWT)
+Implements true 3D spatial-spectral wavelet decomposition to compress spectral bands and capture edge/textural information while preserving the original spatial scale.
+- **Transform**: PyWavelets `wavedecn` over Height, Width, and Spectral axes.
+- **Configuration**: Uses the lightweight `db1` (Haar) wavelet by default with a level-1 decomposition and `symmetric` boundary extension.
+- **Spatial Preservation**: Reconstruction of the approximation back to the original `(256, 256, C)` shape is exposed to downstream users, guaranteeing spatial fidelity.
+- **12/13-Band Agnosticism**: Supports 12-channel Sentinel-2 intermediate datasets and the 13-channel final project specification without assuming fixed spectral dimensionality or fabricating data.
+- **Validation**: Enforces mathematical correctness via finite-input constraints and exact inverse reconstruction tests with errors close to numerical precision.
+
 ## PHASE 2 — SYNTHETIC DEVELOPMENT DATASET
 A synthetic dataset is established to provide structured input for downstream Module 2 and Module 3 development before real satellite ingestion is fully implemented.
 
@@ -261,10 +269,12 @@ The team/faculty should clarify the intended interpretation before final evaluat
 ## PROJECT STATUS
 - Repository: FOUNDATION IN PROGRESS
 - Git Branch: feature/ingestion-signal-processing
-- Module 1 Structure: SETUP
-- Algorithms: NOT STARTED
-- Synthetic Dataset: NOT STARTED
-- Real Satellite Data: NOT STARTED
-- Integration: PENDING
-- Streamlit: PENDING
-- Final Evaluation: PENDING
+- Phase 1 — Spatial-Spectral Contract: **COMPLETED**
+- Phase 2 — Synthetic Dataset: **COMPLETED**
+- Phase 3 — STAC Downloader: **COMPLETED**
+- Phase 4 — Geospatial Tiling & CRS Alignment: **COMPLETED**
+- Phase 5 — Normalization: **COMPLETED**
+- Phase 6 — 3D-DWT: **COMPLETED**
+- Phase 7 — Cloud & Shadow Masking: PENDING
+- Phase 8 — Albedo Filtering: PENDING
+- Phase 9 — Final Integration: PENDING
