@@ -206,6 +206,13 @@ Orchestrates the individual Module 1 components into a clean, testable processin
 - **Rich Diagnostics**: Outputs a comprehensive `Module1Result` preserving all upstream statistics, contamination masks, processing timings, and structural metadata.
 - **Tile-Oriented Memory Model**: Processes imagery incrementally tile-by-tile via a generator API to strictly respect the 16 GB hardware guardrail.
 
+## PHASE 9 — OUT-OF-DOMAIN EVALUATION DATA PIPELINE
+Establishes the robust data pipeline required to prepare geographically separated evaluation tiles (Serbia / Western Balkans) for out-of-domain evaluation. 
+- **Separation**: Saves outputs to `data/evaluation` to strictly prevent data leakage into development/training datasets.
+- **Unified Processing**: Reuses the exact same Module 1 preprocessing pipeline (CRS Alignment, Z-Score, 3D-DWT, Albedo Filtering).
+- **Projection Verification**: Inspects and records geospatial metadata (CRS, bounds, transform) for every tile, verifying that it aligns with the expected output spatial grid.
+- **CLI and Config**: Provides a reusable `module1_ingestion.evaluation_pipeline` to process evaluation regions without fabricating exact AOIs or coordinates (project team provides actual sources).
+
 ## PHASE 2 — SYNTHETIC DEVELOPMENT DATASET
 A synthetic dataset is established to provide structured input for downstream Module 2 and Module 3 development before real satellite ingestion is fully implemented.
 
@@ -293,4 +300,4 @@ The team/faculty should clarify the intended interpretation before final evaluat
 - Phase 6 — 3D-DWT: **COMPLETED**
 - Phase 7 — Cloud & Shadow Masking: **COMPLETED**
 - Phase 8 — Module 1 Pipeline Integration: **COMPLETED**
-- Phase 9 — Final Integration: PENDING
+- Phase 9 — Out-of-Domain Evaluation Data Pipeline: **COMPLETED**

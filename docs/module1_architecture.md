@@ -132,6 +132,13 @@ An orchestration layer (`module1_ingestion/pipeline.py`) unifies the ingestion, 
 - **12/13-Band Interoperability**: Adapts fluidly to both 12-band real intermediate datasets and the 13-channel project specification, routing to appropriate validators.
 - **Memory Management**: Yields processed tiles sequentially via a generator rather than materializing full processed scenes in RAM, strictly adhering to the 16 GB hardware guardrail.
 - **Diagnostics & Result Structure**: Returns a `Module1Result` containing the filtered spatial tensor alongside comprehensive diagnostic timing, contamination statistics, masks, and metadata.
+
+## 13. Out-of-Domain Evaluation Data Pipeline (Phase 9)
+Establishes the infrastructure to securely generate evaluation datasets separated from development and training splits.
+- **Evaluation Regions**: Configured for Serbia (Ext SR) and Western Balkans (Ext WB). The pipeline requires the project team to supply the specific geographical data sources to avoid fabricating arbitrary coordinate boundaries.
+- **Unified Processing**: Strictly processes evaluation data through the identical Module 1 processing pipeline (Z-Score, DWT, Filtering, Validation).
+- **Projection Verification**: For each generated evaluation tile, validates and exports crucial projection metadata (CRS, Affine Transforms, geographical bounds), fulfilling Phase 9 tracking requirements.
+- **Data Isolation**: Ensures output artifacts and deterministic metadata manifests are written strictly to `data/evaluation/` subdirectories to prevent any test-set leakage.
 > - **L1C / MSI**: 13 spectral bands including B10.
 > - **L2A**: 12 surface-reflectance spectral bands because B10 is excluded (no bottom-of-atmosphere information).
 > 

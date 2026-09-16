@@ -22,6 +22,12 @@ outputs/
 data/synthetic/*.npy
 data/synthetic/metadata.json
 
+# evaluation datasets
+data/evaluation/**/*.npy
+data/evaluation/**/*.tif
+data/evaluation/**/*.tiff
+data/evaluation/**/*.jp2
+
 # model artifacts
 *.pt
 *.pth
