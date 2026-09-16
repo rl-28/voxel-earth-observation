@@ -163,6 +163,15 @@ Programmatic STAC-based ingestion of Sentinel-2 Level-2A surface reflectance dat
 - 12-band L2A spectral mapping = verified
 - 13-channel final mapping = pending project clarification
 
+## PHASE 4 — GEOSPATIAL RASTER PROCESSING & TILING
+Transforms raw geospatial raster assets into spatially aligned, non-overlapping 256×256 tiles, matching a specific reference grid. Maintains a 12-band L2A intermediate representation prior to the final 13-channel project specification.
+- **GeoTIFF Inspection**: Metadata evaluation without full-scene loading.
+- **CRS & Transform Handling**: Rasterio-driven coordinate reference alignment.
+- **Resolution Harmonization**: Dynamic resampling via bilinear interpolation for heterogeneous resolutions (e.g., Sentinel-2 10m vs 20m vs 60m).
+- **Reference Grid**: The pipeline aligns all inputs rigidly against a defined target grid (`B04` reference typically).
+- **Tiling & Edge Policy**: Strict non-overlapping 256x256 window generation, discarding incomplete edge windows. Geospatial transforms are retained per tile.
+- **L2A Intermediate State**: Generates a 12-band stack exactly preserving the L2A verified spectral bounds. Note: Normalization is deferred to later stages.
+
 ## PHASE 2 — SYNTHETIC DEVELOPMENT DATASET
 A synthetic dataset is established to provide structured input for downstream Module 2 and Module 3 development before real satellite ingestion is fully implemented.
 

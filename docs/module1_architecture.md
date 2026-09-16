@@ -33,14 +33,38 @@ data/raw/
 Tile Processor
 ```
 
-## 6. GeoTIFF Processing
-Reading raster data, handling invalid/NoData values, and basic imagery checks.
+## 6. Geospatial Raster Processing & Tiling
+Transforms raw geospatial raster assets into spatially aligned, non-overlapping 256×256 tiles. This phase strictly maintains a 12-band L2A intermediate representation prior to the final 13-channel project specification.
+
+Data Flow:
+```text
+Raw Sentinel-2 Assets
+        ↓
+Raster Metadata Inspection
+        ↓
+Reference Grid
+        ↓
+CRS Alignment
+        ↓
+Resolution Harmonization
+        ↓
+Band Ordering
+        ↓
+Windowed 256×256 Extraction
+        ↓
+Geospatial Tile Metadata
+        ↓
+12-Band L2A Intermediate
+        ↓
+Future Normalization / Signal Processing
+```
+*(This is distinct from the final Module 1 (256,256,13) float32 contract)*
 
 ## 7. CRS Handling
-Verifying Coordinate Reference Systems and aligning/reprojecting data where required.
+Verifying Coordinate Reference Systems and aligning/reprojecting data where required using bilinear resampling.
 
 ## 8. Tiling
-Generating non-overlapping 256×256 spatial tiles from larger scenes.
+Generating non-overlapping 256×256 spatial tiles from larger scenes with a discard edge-policy for incomplete windows.
 
 ## 9. Z-score Processing
 Normalizing features per band to stabilize downstream learning.
