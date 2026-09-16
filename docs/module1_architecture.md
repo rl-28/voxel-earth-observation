@@ -112,6 +112,17 @@ Implements true 3D spatial-spectral wavelet decomposition via PyWavelets to comp
 - **Agnostic Representation**: Generically processes both 12-band and 13-band datasets.
 - **Validation**: Strict checks block NaN/Inf inputs and verify near-zero reconstruction error.
 
+## 11. Albedo / Reflection Contamination Filtering
+Provides physically motivated reflection and contamination suppression for surface-reflectance tensors. 
+> **Important Scientific Scope**: Sentinel-2 Level-2A imagery is already atmospherically corrected by Copernicus. This module identifies residual anomalies; it is not a replacement for a full atmospheric radiative-transfer correction system, nor does it calculate absolute physical albedo.
+
+- **Glare / Reflection Anomaly Mask**: Detects unusually high broadband reflectance by requiring simultaneous elevated responses in visible (B03), NIR (B08), and SWIR (B11) channels.
+- **Atmospheric Anomaly Mask**: Detects residual atmospheric scattering/haze via isolated extreme responses in coastal aerosol (B01) and blue (B02) bands.
+- **Cloud-Shadow Anomaly Mask**: Detects shadow-like contamination via abnormally low (but non-zero) visible (B04) and NIR (B08) responses.
+- **Masking Strategy**: Combines individual anomaly masks into a master `contamination_mask`. Contaminated pixels are replaced with a predefined `FILTER_FILL_VALUE`, preserving the original spatial scale `(256, 256, C)`.
+- **Valid-Mask Handling**: Pre-existing invalid pixels are safely excluded from thresholding and statistics to prevent false positives.
+- **Thresholds**: Applies dynamically selected configurable thresholds based on whether the input is raw reflectance or Z-score normalized data.
+
 **Validation**: 
 Explicit validation occurs before handoff to Module 2 to prevent propagation of malformed tensors. Module 1 must ultimately produce a valid `(256, 256, 13), float32` tensor. The mapping of the 13th channel is a project-level specification decision and must not be fabricated by the ingestion pipeline.
 > - **L1C / MSI**: 13 spectral bands including B10.

@@ -190,6 +190,15 @@ Implements true 3D spatial-spectral wavelet decomposition to compress spectral b
 - **12/13-Band Agnosticism**: Supports 12-channel Sentinel-2 intermediate datasets and the 13-channel final project specification without assuming fixed spectral dimensionality or fabricating data.
 - **Validation**: Enforces mathematical correctness via finite-input constraints and exact inverse reconstruction tests with errors close to numerical precision.
 
+## PHASE 7 — ALBEDO / REFLECTION / ATMOSPHERIC FILTERING
+Applies physically motivated reflection and contamination suppression to surface-reflectance tensors. This module identifies residual anomalies rather than replacing upstream Sentinel-2 L2A atmospheric correction processors.
+- **Glare / Reflection Anomaly Detection**: Identifies unusually high broadband reflectance across visible (B03), NIR (B08), and SWIR (B11) channels.
+- **Atmospheric Anomaly Detection**: Flags likely residual atmospheric scattering/haze based on isolated extreme coastal/blue responses (B01, B02).
+- **Cloud-Shadow Anomaly Detection**: Detects shadow-like contamination via abnormally low (but non-zero) visible and NIR response.
+- **Valid-Mask Handling**: Invalid pixels are safely excluded from thresholding and statistics.
+- **Non-Destructive Masking**: Contaminated pixels are explicitly masked using `FILTER_FILL_VALUE`, while spatial scale `(256, 256, C)` is strictly preserved. Generates comprehensive `AlbedoFilterResult` diagnostics.
+- **Scale-Aware Thresholds**: Dynamically applies appropriate thresholds based on whether the input is raw reflectance or Z-score normalized data.
+
 ## PHASE 2 — SYNTHETIC DEVELOPMENT DATASET
 A synthetic dataset is established to provide structured input for downstream Module 2 and Module 3 development before real satellite ingestion is fully implemented.
 
@@ -275,6 +284,6 @@ The team/faculty should clarify the intended interpretation before final evaluat
 - Phase 4 — Geospatial Tiling & CRS Alignment: **COMPLETED**
 - Phase 5 — Normalization: **COMPLETED**
 - Phase 6 — 3D-DWT: **COMPLETED**
-- Phase 7 — Cloud & Shadow Masking: PENDING
-- Phase 8 — Albedo Filtering: PENDING
+- Phase 7 — Cloud & Shadow Masking: **COMPLETED**
+- Phase 8 — Albedo Filtering: **COMPLETED** (Integrated into Phase 7)
 - Phase 9 — Final Integration: PENDING

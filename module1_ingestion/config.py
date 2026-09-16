@@ -33,6 +33,21 @@ WAVELET_NAME = "db1"
 WAVELET_LEVEL = 1
 WAVELET_MODE = "symmetric"
 
+# ---------------------------------------------------------
+# Phase 7: Albedo / Reflection / Atmospheric Filtering
+# ---------------------------------------------------------
+ALBEDO_FILTER_ENABLED = True
+GLARE_Z_THRESHOLD = 3.0           
+SHADOW_Z_THRESHOLD = -1.5         
+ATMOSPHERIC_Z_THRESHOLD = 2.5     
+
+GLARE_REFLECTANCE_THRESHOLD = 4000.0
+SHADOW_REFLECTANCE_THRESHOLD = 500.0
+ATMOSPHERIC_REFLECTANCE_THRESHOLD = 2000.0
+
+MIN_VALID_PIXEL_FRACTION = 0.05
+FILTER_FILL_VALUE = 0.0
+
 # Important processing constants
 TILE_SIZE = 256
 NUM_BANDS = 13
