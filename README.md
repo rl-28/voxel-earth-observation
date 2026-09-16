@@ -172,6 +172,16 @@ Transforms raw geospatial raster assets into spatially aligned, non-overlapping 
 - **Tiling & Edge Policy**: Strict non-overlapping 256x256 window generation, discarding incomplete edge windows. Geospatial transforms are retained per tile.
 - **L2A Intermediate State**: Generates a 12-band stack exactly preserving the L2A verified spectral bounds. Note: Normalization is deferred to later stages.
 
+## PHASE 5 — Z-SCORE NORMALIZATION
+Provides mathematically robust statistical standardisation across the spatial-spectral tile arrays, independent of source size.
+- **Per-Band Standardisation**: Mean and standard deviation are calculated independently per spectral band ($Z = (X - \mu) / \sigma$).
+- **Per-Tile Scope**: Baseline statistics are scoped to the tile level rather than a global scene.
+- **Valid-Pixel Masking**: Nodata/invalid pixels are completely excluded from statistical calculations and Z-score transformations.
+- **Zero-Valued Valid Pixels**: Zeros are treated correctly as physical measurements, not nodata, unless explicitly masked.
+- **Constant Band Handling**: Handled strictly via numerical tolerance to prevent division by zero or NaN creation.
+- **Output Contract**: Results are always finite, cast precisely to `float32`, returning an explicitly safe tensor and validity mask for downstream consumption.
+- **Multi-Shape Support**: Agnostically supports both the 12-band real Sentinel-2 intermediate data and the final 13-channel project interface.
+
 ## PHASE 2 — SYNTHETIC DEVELOPMENT DATASET
 A synthetic dataset is established to provide structured input for downstream Module 2 and Module 3 development before real satellite ingestion is fully implemented.
 

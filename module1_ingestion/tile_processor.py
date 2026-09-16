@@ -158,6 +158,6 @@ def process_raster_to_tiles(
             "transform": tile_transform,
             "crs": reference_meta["crs"],
             "bounds": rasterio.windows.bounds(window, reference_meta["transform"]),
-            # Check for Nodata. We do not filter them here, just flag.
-            "nodata_present": np.isnan(tile_stack).any() or (tile_stack == 0.0).any()
+            # Nodata check: Rely on NaN/Inf or specific rasterio nodata mask if we extracted it, but do NOT assume 0.0 is nodata.
+            "nodata_present": not np.isfinite(tile_stack).all()
         }

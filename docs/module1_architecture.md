@@ -93,19 +93,22 @@ This contract exists to enforce strict interface boundaries between modules, ens
 - **Expected Shape**: (256, 256, 13)
 - **Axis Order**: (height, width, spectral_bands)
 - **Dtype**: `numpy.float32`
-- **Finite-Value Requirement**: All output values must be finite. No NaN or Inf values are allowed.
+- **Finite-Value Requirement**: All output values must be finite.
 
-**Normalization Expectations**: 
-Z-score normalization `Z = (X - mean) / standard_deviation` is expected to be applied consistently across spectral data to stabilize downstream learning. The implementation must handle zero standard deviation cases to avoid generating NaN/Inf values.
+## 9. Z-Score Normalization
+Independent statistical normalization ($Z = (X - \mu) / \sigma$) applied to each spectral channel within a 256×256 tile.
+- **Precision**: Statistics ($\mu$, $\sigma$) calculated in `float64`, applied and downcast to strictly `float32`.
+- **Validity**: Utilizes explicit masks or `isfinite` checks to exclude nodata. (A value of `0.0` is treated as a valid physical measurement).
+- **Constant Bands**: Zero-variance channels gracefully map to `0.0` to preserve the finite output contract.
+- **Flexibility**: Uncoupled from band counts, supporting both the intermediate 12-band real data and final 13-band tensors.
 
-> [!WARNING]
-> Sentinel-2 L2A provides 12 surface-reflectance spectral bands. The project interface currently requires 13 channels. The mapping of the 13th channel is a project-level specification decision and must not be fabricated by the ingestion pipeline.
+**Validation**: 
+Explicit validation occurs before handoff to Module 2 to prevent propagation of malformed tensors. Module 1 must ultimately produce a valid `(256, 256, 13), float32` tensor. The mapping of the 13th channel is a project-level specification decision and must not be fabricated by the ingestion pipeline.
 > - **L1C / MSI**: 13 spectral bands including B10.
 > - **L2A**: 12 surface-reflectance spectral bands because B10 is excluded (no bottom-of-atmosphere information).
 > 
 > The ingestion pipeline explicitly maps the 12 verified L2A bands. The 13th channel mapping is pending project-level specification clarification.
 
-**Validation**: 
 Explicit validation occurs before handoff to Module 2 to prevent propagation of malformed tensors. Module 1 must ultimately produce a valid `(256, 256, 13), float32` tensor.
 
 ```text

@@ -9,9 +9,20 @@ from pathlib import Path
 
 import os
 
-# STAC Configuration
-COPERNICUS_STAC_URL = os.getenv("COPERNICUS_STAC_URL", "https://stac.dataspace.copernicus.eu/v1/")
+# ---------------------------------------------------------
+# Phase 3: STAC Configuration
+# ---------------------------------------------------------
+COPERNICUS_STAC_URL = os.getenv("COPERNICUS_STAC_URL", "https://sh.dataspace.copernicus.eu/api/catalogs/stac")
 SENTINEL_2_L2A_COLLECTION = "sentinel-2-l2a"
+
+# ---------------------------------------------------------
+# Phase 5: Normalization Constants
+# ---------------------------------------------------------
+import numpy as np
+ZSCORE_DTYPE = np.float32
+ZSCORE_STAT_DTYPE = np.float64
+ZSCORE_DDOF = 0
+NORMALIZATION_FILL_VALUE = 0.0
 DEFAULT_CLOUD_COVER = 20.0
 STAC_TIMEOUT_SEC = 30
 
