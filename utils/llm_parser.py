@@ -16,6 +16,8 @@ from typing import List, Dict, Optional, Any
 
 logger = logging.getLogger(__name__)
 
+from .api_manager import get_api_manager
+
 # Optional third-party imports with fallback handling
 try:
     import google.generativeai as genai
@@ -96,15 +98,22 @@ class VoxelExecutionContract:
 class VoxelStageZeroParser:
     """
     Stage 0 Natural Language Query Compiler for the Voxel Earth Observation platform.
-    Uses Google Gemini for LLM semantic parsing and Nominatim for spatial geocoding.
+    Uses centralized APIManager for credentials, with Google Gemini, OpenAI, Groq,
+    and deterministic offline rule-based fallbacks.
     """
 
-    def __init__(self, api_key: Optional[str] = None, model_name: str = "gemini-1.5-flash"):
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model_name: str = "gemini-1.5-flash",
+        api_manager: Optional[Any] = None
+    ):
+        self.api_mgr = api_manager or get_api_manager()
+        self.api_key = api_key or self.api_mgr.get_gemini_key()
         self.model_name = model_name
         self.model = None
 
-        if HAS_GENAI and self.api_key and self.api_key != "YOUR_GEMINI_API_KEY_HERE":
+        if HAS_GENAI and self.api_key:
             try:
                 genai.configure(api_key=self.api_key)
                 self.model = genai.GenerativeModel(self.model_name)

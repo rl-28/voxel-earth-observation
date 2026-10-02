@@ -1,38 +1,60 @@
+# Python bytecode & environments
 __pycache__/
 *.pyc
 .venv/
 venv/
 env/
 .ipynb_checkpoints/
+.pytest_cache/
+.coverage
+coverage.xml
+
+# Geospatial binary rasters & data files
 *.tif
 *.tiff
 *.jp2
-.env
+*.nc
+*.hdf
+*.hdf5
+*.npy
 
-# temporary processing files
+# Environment variables & security credentials
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.cert
+*.crt
+secrets.json
+credentials.json
+*_token.txt
+
+# Temporary processing files
 temp/
 tmp/
 *.tmp
 
-# generated outputs
+# Generated outputs
 output/
 outputs/
 
-# synthetic datasets
+# Synthetic datasets
 data/synthetic/*.npy
 data/synthetic/metadata.json
 
-# evaluation datasets
+# Evaluation datasets
 data/evaluation/**/*.npy
 data/evaluation/**/*.tif
 data/evaluation/**/*.tiff
 data/evaluation/**/*.jp2
 
-# model artifacts
+# Model artifacts
 *.pt
 *.pth
 *.h5
+*.onnx
 
-# logs
+# Logs
 *.log
 logs/
