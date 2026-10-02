@@ -40,6 +40,10 @@ from .bio_search import (
     sigmoid_transfer_function,
     binary_whale_optimization_search
 )
+from .orchestrator import (
+    apply_domain_balance_guard,
+    run_module2_optimization
+)
 
 __all__ = [
     "BAND_NAMES",
@@ -69,5 +73,7 @@ __all__ = [
     "repair_population",
     "generate_chaotic_population",
     "sigmoid_transfer_function",
-    "binary_whale_optimization_search"
+    "binary_whale_optimization_search",
+    "apply_domain_balance_guard",
+    "run_module2_optimization"
 ]

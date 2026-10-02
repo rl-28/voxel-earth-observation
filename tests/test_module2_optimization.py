@@ -36,14 +36,16 @@ from module2_optimization.bio_search import (
     sigmoid_transfer_function,
     binary_whale_optimization_search
 )
+from module2_optimization.orchestrator import (
+    apply_domain_balance_guard,
+    run_module2_optimization
+)
 
 
 class TestPhysicsPartitioning(unittest.TestCase):
     def setUp(self):
-        # Deterministic 3D synthetic tensor: (256, 256, 13)
         np.random.seed(42)
         self.tensor_3d = np.random.randn(256, 256, 13).astype(np.float32)
-        # Deterministic 4D synthetic batch: (4, 256, 256, 13)
         self.tensor_4d = np.random.randn(4, 256, 256, 13).astype(np.float32)
 
     def test_band_configuration_and_indices(self):
@@ -57,7 +59,6 @@ class TestPhysicsPartitioning(unittest.TestCase):
         self.assertEqual(BAND_NAMES[10], "B10")
         self.assertEqual(BAND_NAMES[12], "B12")
 
-        # Bidirectional index mappings
         for i, name in enumerate(BAND_NAMES):
             self.assertEqual(BAND_TO_INDEX[name], i)
             self.assertEqual(INDEX_TO_BAND[i], name)
@@ -85,13 +86,11 @@ class TestPhysicsPartitioning(unittest.TestCase):
         self.assertIn("SWIR", partitions)
         self.assertIn("AUXILIARY", partitions)
 
-        # Check shapes
         self.assertEqual(partitions["VISIBLE"]["data"].shape, (256, 256, 3))
         self.assertEqual(partitions["NIR_RED_EDGE"]["data"].shape, (256, 256, 5))
         self.assertEqual(partitions["SWIR"]["data"].shape, (256, 256, 2))
         self.assertEqual(partitions["AUXILIARY"]["data"].shape, (256, 256, 3))
 
-        # Check content fidelity
         np.testing.assert_array_equal(
             partitions["VISIBLE"]["data"],
             self.tensor_3d[..., [1, 2, 3]]
@@ -122,7 +121,7 @@ class TestPhysicsPartitioning(unittest.TestCase):
             validate_input_tensor(np.zeros((128, 128, 13), dtype=np.float32))
 
         with self.assertRaises(ValueError):
-            validate_input_tensor(np.zeros((256, 256), dtype=np.float32))
+            validate_input_tensor(np.zeros((256, 256, 12), dtype=np.float32))
 
         inf_tensor = self.tensor_3d.copy()
         inf_tensor[0, 0, 0] = np.nan
@@ -134,8 +133,8 @@ class TestFitnessScorecard(unittest.TestCase):
     def setUp(self):
         np.random.seed(42)
         self.tensor = np.random.randn(256, 256, 13).astype(np.float32)
-        self.tensor[128:, :, 1] += 3.0  # B02
-        self.tensor[:, 128:, 7] += 4.0  # B08
+        self.tensor[128:, :, 1] += 3.0
+        self.tensor[:, 128:, 7] += 4.0
 
         self.evaluator = FitnessEvaluator(
             tensor=self.tensor,
@@ -292,8 +291,8 @@ class TestBinaryWhaleOptimization(unittest.TestCase):
     def setUp(self):
         np.random.seed(42)
         self.tensor = np.random.randn(256, 256, 13).astype(np.float32)
-        self.tensor[128:, :, 1] += 3.0  # B02
-        self.tensor[:, 128:, 7] += 4.0  # B08
+        self.tensor[128:, :, 1] += 3.0
+        self.tensor[:, 128:, 7] += 4.0
         self.evaluator = FitnessEvaluator(
             tensor=self.tensor,
             target_band_count=4,
@@ -339,7 +338,6 @@ class TestBinaryWhaleOptimization(unittest.TestCase):
 
     def test_bwoa_result_superiority_or_equality(self):
         """Verifies that optimized mask fitness is >= initial best seeded fitness."""
-        # Initial seed best
         initial_pop = generate_chaotic_population(
             num_agents=10,
             target_band_count=4,
@@ -358,6 +356,101 @@ class TestBinaryWhaleOptimization(unittest.TestCase):
         )
         self.assertGreaterEqual(best_fitness, initial_best_score)
         self.assertEqual(history[0], initial_best_score)
+
+
+class TestModule2Orchestrator(unittest.TestCase):
+    def setUp(self):
+        np.random.seed(42)
+        # 3D test tensor: (256, 256, 13)
+        self.tensor_3d = np.random.randn(256, 256, 13).astype(np.float32)
+        self.tensor_3d[128:, :, 1] += 3.0  # B02
+        self.tensor_3d[:, 128:, 7] += 4.0  # B08
+
+        # 4D test batch: (10, 256, 256, 13)
+        self.tensor_10_scenes = np.random.randn(10, 256, 256, 13).astype(np.float32)
+
+    def test_end_to_end_on_10_scenes_batch(self):
+        """Tests complete end-to-end optimization on (10, 256, 256, 13) array."""
+        mask, selected_indices, metrics = run_module2_optimization(
+            input_tensor=self.tensor_10_scenes,
+            target_count=5,
+            pop_size=8,
+            max_iter=10,
+            seed=42
+        )
+
+        self.assertEqual(len(mask), 13)
+        self.assertTrue(np.all(np.isin(mask, [0, 1])))
+        self.assertLessEqual(np.sum(mask), 5)
+        self.assertEqual(len(selected_indices), np.sum(mask))
+
+        # Check metrics
+        self.assertIn("accuracy", metrics)
+        self.assertIn("jm_distance", metrics)
+        self.assertIn("data_reduction_pct", metrics)
+        self.assertIn("flop_savings_pct", metrics)
+        self.assertIn("convergence_history", metrics)
+        self.assertGreater(metrics["data_reduction_pct"], 50.0)
+
+    def test_3d_input_and_custom_labels(self):
+        """Tests optimization on 3D (256, 256, 13) input with explicit labels."""
+        custom_labels = np.random.randint(0, 3, size=(256, 256))
+        mask, selected_indices, metrics = run_module2_optimization(
+            input_tensor=self.tensor_3d,
+            target_count=4,
+            labels=custom_labels,
+            pop_size=6,
+            max_iter=8,
+            seed=42
+        )
+        self.assertLessEqual(len(selected_indices), 4)
+        self.assertGreaterEqual(metrics["accuracy"], 0.0)
+        self.assertLessEqual(metrics["accuracy"], 1.0)
+
+    def test_target_count_clamping(self):
+        """Verifies that out-of-range target counts (e.g. 2 or 16) are clamped to [4, 13]."""
+        # Test under-range (< 4)
+        mask_low, indices_low, metrics_low = run_module2_optimization(
+            input_tensor=self.tensor_3d,
+            target_count=2,
+            pop_size=6,
+            max_iter=5,
+            seed=42
+        )
+        self.assertEqual(metrics_low["target_band_count"], 4)
+        self.assertLessEqual(len(indices_low), 4)
+
+        # Test over-range (> 13)
+        mask_high, indices_high, metrics_high = run_module2_optimization(
+            input_tensor=self.tensor_3d,
+            target_count=16,
+            pop_size=6,
+            max_iter=5,
+            seed=42
+        )
+        self.assertEqual(metrics_high["target_band_count"], 13)
+        self.assertLessEqual(len(indices_high), 13)
+
+    def test_domain_balance_guard(self):
+        """Verifies that physics domain balance guard ensures representation of key domains."""
+        # Force a mask with only VISIBLE bands active (indices 1, 2, 3)
+        unbalanced_mask = np.zeros(13, dtype=np.int32)
+        unbalanced_mask[[1, 2, 3]] = 1
+
+        evaluator = FitnessEvaluator(tensor=self.tensor_3d, target_band_count=4, seed=42)
+        balanced_mask = apply_domain_balance_guard(
+            mask=unbalanced_mask,
+            target_band_count=4,
+            evaluator=evaluator,
+            rng=np.random.default_rng(42)
+        )
+
+        # NIR (4-8) and SWIR (11-12) should now be represented
+        has_nir = any(balanced_mask[idx] == 1 for idx in SPECTRUM_DOMAINS["NIR_RED_EDGE"]["indices"])
+        has_swir = any(balanced_mask[idx] == 1 for idx in SPECTRUM_DOMAINS["SWIR"]["indices"])
+        self.assertTrue(has_nir)
+        self.assertTrue(has_swir)
+        self.assertLessEqual(np.sum(balanced_mask), 4)
 
 
 if __name__ == "__main__":
