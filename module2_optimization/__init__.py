@@ -44,6 +44,9 @@ from .orchestrator import (
     apply_domain_balance_guard,
     run_module2_optimization
 )
+from .integration import (
+    apply_module2_band_selection
+)
 
 __all__ = [
     "BAND_NAMES",
@@ -75,5 +78,6 @@ __all__ = [
     "sigmoid_transfer_function",
     "binary_whale_optimization_search",
     "apply_domain_balance_guard",
-    "run_module2_optimization"
+    "run_module2_optimization",
+    "apply_module2_band_selection"
 ]

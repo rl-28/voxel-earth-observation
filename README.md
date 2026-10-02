@@ -296,9 +296,67 @@ The team/faculty should clarify the intended interpretation before final evaluat
 - preprocessing integration
 - Streamlit linkage
 
+## MODULE 2: METAHEURISTIC OPTIMIZATION CORE
+Module 2 (`module2_optimization/`) implements the metaheuristic band selection and spectral dimensionality reduction engine. It translates standardized 13-band Sentinel-2 L2A tensors (`(256, 256, 13)`) into task-adaptive reduced tensors (`(256, 256, k)`) optimized for downstream hybrid CNN-ViT inference.
+
+### 1. Architectural Components
+1. **Physics-Guided Spectral Partitioning (`physics_partitioning.py`)**:
+   - Groups 13 Sentinel-2 channels into physical domains:
+     - `VISIBLE`: B02, B03, B04
+     - `NIR_RED_EDGE`: B05, B06, B07, B08, B8A
+     - `SWIR`: B11, B12
+     - `AUXILIARY`: B01, B09, B10
+2. **Green-AI Multi-Objective Fitness Scorecard (`fitness_scorecard.py`)**:
+   - Multi-objective fitness formulation:
+     $$\text{Fitness}(X) = w_{\text{acc}} \cdot \text{Accuracy} + w_{\text{jm}} \cdot \text{JM}_{\text{norm}} - w_{\text{band}} \cdot \left(\frac{\|X\|_1}{13}\right) - \text{OverBudgetPenalty} - \text{RAMPenalty}$$
+   - Fast $k$-NN / surrogate accuracy evaluated on subsampled train/test partitions.
+   - Regularized Jeffries-Matusita (JM) distance ($\epsilon = 10^{-6}$) with determinant safeguards.
+   - Deterministic $K$-Means ($k=6$) pseudo-labeling when external annotations are omitted.
+   - Hard step penalty (100.0) applied if estimated tensor footprint exceeds the 16.0 GB hardware ceiling.
+   - Memoization cache keyed by binary mask byte sequences.
+3. **Chebyshev Chaotic Seeding & Opposition-Based Learning (`chaotic_seeding.py`)**:
+   - Generates ergodic initial populations in $[-1, 1]$ via Chebyshev map ($x_{k+1} = \cos(d \cdot \arccos(x_k))$).
+   - Enforces spectral budget constraints ($1 \le \|X\|_1 \le \text{target\_band\_count}$) via deterministic bit repair.
+   - Applies Opposition-Based Learning ($X_{\text{opp}} = 1 - X$) and selects the top $N$ fittest individuals.
+4. **Binary Whale Optimization Algorithm (`bio_search.py`)**:
+   - Sigmoid transfer function $S(v) = \frac{1}{1 + e^{-v}}$ for discrete bit updates.
+   - Encircling prey, random exploration ($|A| \ge 1$), and logarithmic bubble-net spiral attack.
+   - Monotonic best fitness convergence tracking with patience-based early stopping.
+5. **Orchestrator & Physics Domain Balance Guard (`orchestrator.py`)**:
+   - `run_module2_optimization()`: Clamps target counts to $[4, 13]$ with warnings, coordinates BWOA search, ensures `VISIBLE`, `NIR_RED_EDGE`, and `SWIR` representation, and calculates computational reduction metrics.
+
+### 2. Computational Reduction Metrics & Formulas
+- **Data Volume Reduction**:
+  $$\text{Data Reduction (\%)} = \left(\frac{13 - k_{\text{selected}}}{13}\right) \times 100\%$$
+- **FLOP Savings**:
+  In CNN-ViT architectures, early patch-embedding and initial 2D/3D convolutional layers scale linearly with input spectral channels $C_{\text{in}}$. Reducing from 13 to $k$ bands yields:
+  $$\text{FLOP Savings (\%)} = \left(\frac{13 - k_{\text{selected}}}{13}\right) \times 100\%$$
+
+### 3. Usage Example
+```python
+from module2_optimization import run_module2_optimization, apply_module2_band_selection
+from utils.llm_parser import VoxelExecutionContract
+
+# Direct Orchestrator Execution
+optimal_mask, selected_indices, metrics = run_module2_optimization(
+    input_tensor=tensor_13_bands,  # Shape: (256, 256, 13)
+    target_count=4,                # Target band budget
+    seed=42
+)
+
+# Pipeline Integration Handoff
+reduced_tensor, indices, metrics = apply_module2_band_selection(
+    tensor_13_bands=tensor_13_bands,
+    contract=stage0_contract,      # VoxelExecutionContract
+    enable_module2=True            # Feature flag
+)
+# Result: reduced_tensor has shape (256, 256, 4)
+```
+
 ## PROJECT STATUS
 - Repository: FOUNDATION IN PROGRESS
-- Git Branch: feature/ingestion-signal-processing
+- Git Branch: feature/optimization-engine
+- Stage 0 — Query Parser & Geospatial Compiler: **COMPLETED**
 - Phase 1 — Spatial-Spectral Contract: **COMPLETED**
 - Phase 2 — Synthetic Dataset: **COMPLETED**
 - Phase 3 — STAC Downloader: **COMPLETED**
@@ -309,3 +367,5 @@ The team/faculty should clarify the intended interpretation before final evaluat
 - Phase 8 — Module 1 Pipeline Integration: **COMPLETED**
 - Phase 9 — Out-of-Domain Evaluation Data Pipeline: **COMPLETED**
 - Phase 10 — Streamlit Frontend/Backend Integration: **COMPLETED**
+- Module 2 — Metaheuristic Optimization Core: **COMPLETED**
+
