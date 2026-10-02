@@ -67,13 +67,14 @@ class APIManager:
             cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self, env_path: Optional[str] = None):
+    def __init__(self, env_path: Optional[str] = None, auto_load: bool = True):
         if getattr(self, "_initialized", False):
             return
 
         self._project_root = Path(__file__).resolve().parent.parent
-        self._env_file = Path(env_path) if env_path else (self._project_root / ".env")
-        self._load_environment()
+        self._env_file = Path(env_path) if env_path is not None else (self._project_root / ".env")
+        if auto_load:
+            self._load_environment()
         self._initialized = True
 
     def _load_environment(self) -> None:

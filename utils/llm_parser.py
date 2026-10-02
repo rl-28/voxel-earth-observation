@@ -11,14 +11,19 @@ import os
 import json
 import re
 import logging
+import urllib.request
+import urllib.parse
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
+
+try:
+    from .api_manager import get_api_manager
+except ImportError:
+    from utils.api_manager import get_api_manager
 
 logger = logging.getLogger(__name__)
 
-from .api_manager import get_api_manager
-
-# Optional third-party imports with fallback handling
+# Optional third-party imports
 try:
     import google.generativeai as genai
     HAS_GENAI = True
@@ -80,6 +85,8 @@ class VoxelExecutionContract:
     priority_spectrum_domains: List[str] # Physical Domains -> For Spectrum Partitioning
     scorecard_weights: Dict[str, float]  # Weights -> For Green AI Scorecard
     user_summary: str                    # Friendly summary for UI display
+    llm_provider: str = "gemini"         # Active LLM provider used
+    geocoder: str = "nominatim"          # Geocoding provider used
 
     def to_dict(self) -> Dict[str, Any]:
         """Serializes contract to a standard Python dictionary."""
@@ -92,14 +99,123 @@ class VoxelExecutionContract:
             "priority_spectrum_domains": self.priority_spectrum_domains,
             "scorecard_weights": self.scorecard_weights,
             "user_summary": self.user_summary,
+            "llm_provider": self.llm_provider,
+            "geocoder": self.geocoder,
         }
+
+
+def _call_gemini_rest_api(api_key: str, system_prompt: str, model_name: str = "gemini-1.5-flash") -> Optional[Dict[str, Any]]:
+    """
+    Direct REST API client for Google Gemini without requiring third-party SDK dependencies.
+    """
+    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+    payload = {
+        "contents": [
+            {
+                "parts": [{"text": system_prompt}]
+            }
+        ],
+        "generationConfig": {
+            "responseMimeType": "application/json"
+        }
+    }
+
+    try:
+        req = urllib.request.Request(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=12) as response:
+            result = json.loads(response.read().decode("utf-8"))
+            candidates = result.get("candidates", [])
+            if candidates:
+                content = candidates[0].get("content", {})
+                parts = content.get("parts", [])
+                if parts:
+                    raw_text = parts[0].get("text", "").strip()
+                    # Strip any possible markdown backticks
+                    if raw_text.startswith("```"):
+                        raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
+                        raw_text = re.sub(r"\n?```$", "", raw_text)
+                    return json.loads(raw_text)
+    except Exception as e:
+        logger.debug(f"Gemini REST call failed: {e}")
+        return None
+    return None
+
+
+def _geocode_location_live(location_query: str, google_maps_key: Optional[str] = None) -> Tuple[float, float, str]:
+    """
+    Geocodes a location query to (latitude, longitude, provider_name).
+    Tries:
+    1. Google Maps Geocoding API (if key present)
+    2. OpenStreetMap Nominatim live REST HTTP with progressive relaxation
+    3. geopy Nominatim (if installed)
+    4. Fallback to South Mumbai (18.95, 72.82) on network failure or unfound queries.
+    """
+    if not location_query or not location_query.strip():
+        return DEFAULT_LAT, DEFAULT_LON, "Pre-cached Fallback"
+
+    raw_query = location_query.strip()
+    # Generate candidate queries for complex compounds (e.g. "Amazon Basin, Para, Brazil" -> ["Amazon Basin, Para, Brazil", "Para, Brazil", "Amazon Basin", "Brazil"])
+    candidates = [raw_query]
+    if "," in raw_query:
+        parts = [p.strip() for p in raw_query.split(",") if p.strip()]
+        if len(parts) >= 2:
+            candidates.append(", ".join(parts[1:]))
+            candidates.append(parts[0])
+            candidates.append(parts[-1])
+
+    # 1. Try Google Maps Geocoding API if key configured
+    if google_maps_key and google_maps_key.strip():
+        for q in candidates:
+            try:
+                params = urllib.parse.urlencode({"address": q, "key": google_maps_key.strip()})
+                url = f"https://maps.googleapis.com/maps/api/geocode/json?{params}"
+                req = urllib.request.Request(url)
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    if data.get("status") == "OK" and len(data.get("results", [])) > 0:
+                        loc = data["results"][0]["geometry"]["location"]
+                        return float(loc["lat"]), float(loc["lng"]), "Google Maps Geocoding API"
+            except Exception as e:
+                logger.debug(f"Google Maps geocoding failed for '{q}': {e}")
+
+    # 2. Try direct HTTP Nominatim API (OpenStreetMap)
+    for q in candidates:
+        try:
+            params = urllib.parse.urlencode({"q": q, "format": "json", "limit": 1})
+            url = f"https://nominatim.openstreetmap.org/search?{params}"
+            req = urllib.request.Request(url, headers={"User-Agent": "VoxelEarthObservation/1.0 (voxel@earth.ai)"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                if data and len(data) > 0:
+                    lat = float(data[0]["lat"])
+                    lon = float(data[0]["lon"])
+                    return lat, lon, "OpenStreetMap Nominatim (Live REST)"
+        except Exception as e:
+            logger.debug(f"HTTP Nominatim lookup failed for '{q}': {e}")
+
+    # 3. Try geopy if installed
+    if HAS_GEOPY and Nominatim is not None:
+        try:
+            geolocator = Nominatim(user_agent="voxel_stage0_parser")
+            for q in candidates:
+                loc = geolocator.geocode(q, timeout=5)
+                if loc:
+                    return float(loc.latitude), float(loc.longitude), "geopy Nominatim"
+        except Exception as e:
+            logger.debug(f"geopy Nominatim lookup failed: {e}")
+
+    return DEFAULT_LAT, DEFAULT_LON, "Pre-cached Fallback (South Mumbai)"
 
 
 class VoxelStageZeroParser:
     """
     Stage 0 Natural Language Query Compiler for the Voxel Earth Observation platform.
-    Uses centralized APIManager for credentials, with Google Gemini, OpenAI, Groq,
-    and deterministic offline rule-based fallbacks.
+    Uses centralized APIManager for credentials, with Google Gemini (SDK or REST),
+    live OpenStreetMap Nominatim geocoding, and deterministic offline rule-based fallbacks.
     """
 
     def __init__(
@@ -118,42 +234,24 @@ class VoxelStageZeroParser:
                 genai.configure(api_key=self.api_key)
                 self.model = genai.GenerativeModel(self.model_name)
             except Exception as e:
-                logger.warning(f"Failed to initialize Gemini model: {e}")
+                logger.warning(f"Failed to initialize Gemini SDK model: {e}")
                 self.model = None
 
-        if HAS_GEOPY and Nominatim is not None:
-            try:
-                self.geolocator = Nominatim(user_agent="voxel_stage0_parser")
-            except Exception as e:
-                logger.warning(f"Failed to initialize Nominatim geolocator: {e}")
-                self.geolocator = None
-        else:
-            self.geolocator = None
-
-    def _geocode_to_bbox(self, location_query: str) -> List[float]:
+    def _geocode_to_bbox(self, location_query: str) -> Tuple[List[float], str]:
         """
         Converts place name into a ~2.56 km x 2.56 km geospatial BBOX:
-        [min_lon, min_lat, max_lon, max_lat].
-        Falls back to South Mumbai [72.8075, 18.9375, 72.8325, 18.9625] on error or timeout.
+        [min_lon, min_lat, max_lon, max_lat] and returns geocoder name.
         """
-        lat, lon = DEFAULT_LAT, DEFAULT_LON
-
-        if self.geolocator and location_query and location_query.strip():
-            try:
-                loc = self.geolocator.geocode(location_query, timeout=5)
-                if loc:
-                    lat, lon = loc.latitude, loc.longitude
-            except Exception as e:
-                logger.debug(f"Geocoding exception for '{location_query}', falling back to default: {e}")
-                lat, lon = DEFAULT_LAT, DEFAULT_LON
-
+        gmaps_key = self.api_mgr.get_google_maps_key() if self.api_mgr else None
+        lat, lon, provider = _geocode_location_live(location_query, google_maps_key=gmaps_key)
         offset = BBOX_OFFSET
-        return [
+        bbox = [
             round(lon - offset, 4),  # min_lon
             round(lat - offset, 4),  # min_lat
             round(lon + offset, 4),  # max_lon
             round(lat + offset, 4)   # max_lat
         ]
+        return bbox, provider
 
     def _rule_based_fallback(self, user_prompt: str) -> Dict[str, Any]:
         """
@@ -210,12 +308,11 @@ class VoxelStageZeroParser:
     def parse(self, user_prompt: str) -> VoxelExecutionContract:
         """
         Sends prompt to LLM and returns structured Execution Contract.
-        Falls back to rule-based parser if API key is not configured or generation fails.
+        Uses Gemini SDK -> Gemini REST -> Rule-based fallback.
         """
         raw = None
-
-        if self.model is not None:
-            system_prompt = f"""You are the Stage 0 Natural Language Query Compiler for "Voxel", an Earth Observation platform using Sentinel-2 Level-2A satellite imagery, multi-objective Whale Optimization Algorithm (WOA) band selection, and hybrid CNN-ViT neural fusion.
+        llm_provider_used = "rule_based_fallback"
+        system_prompt = f"""You are the Stage 0 Natural Language Query Compiler for "Voxel", an Earth Observation platform using Sentinel-2 Level-2A satellite imagery, multi-objective Whale Optimization Algorithm (WOA) band selection, and hybrid CNN-ViT neural fusion.
 
 USER PROMPT:
 "{user_prompt}"
@@ -237,23 +334,34 @@ Return ONLY a valid raw JSON object matching this schema with NO markdown backti
   "scorecard_weights": {{"accuracy": float, "jm_separability": float, "band_penalty": float}},
   "user_summary": "string"
 }}"""
+
+        # 1. Try Gemini SDK if initialized
+        if self.model is not None:
             try:
                 response = self.model.generate_content(
                     system_prompt,
                     generation_config={"response_mime_type": "application/json"}
                 )
                 text = response.text.strip()
-                # Clean possible markdown backticks if returned
                 if text.startswith("```"):
                     text = re.sub(r"^```(?:json)?\n?", "", text)
                     text = re.sub(r"\n?```$", "", text)
                 raw = json.loads(text)
+                llm_provider_used = f"Google Gemini SDK ({self.model_name})"
             except Exception as e:
-                logger.info(f"LLM generation failed or unavailable ({e}), using fallback parser.")
+                logger.debug(f"Gemini SDK generation failed: {e}")
                 raw = None
 
+        # 2. Try direct Gemini REST API if SDK not available or failed
+        if raw is None and self.api_key:
+            raw = _call_gemini_rest_api(self.api_key, system_prompt, self.model_name)
+            if raw is not None:
+                llm_provider_used = f"Google Gemini REST API ({self.model_name})"
+
+        # 3. Fallback to deterministic rule-based parser
         if raw is None or not isinstance(raw, dict):
             raw = self._rule_based_fallback(user_prompt)
+            llm_provider_used = "Deterministic Offline Rule Engine"
 
         # Sanitize and validate fields
         location_query = raw.get("location_query") or DEFAULT_LOCATION_NAME
@@ -268,8 +376,8 @@ Return ONLY a valid raw JSON object matching this schema with NO markdown backti
             f"Configured Voxel satellite pipeline for {task_type.lower()} analysis across {location_query}."
         )
 
-        # Convert place string to exact BBOX coordinates
-        bbox = self._geocode_to_bbox(location_query)
+        # Geocode to real BBOX coordinates
+        bbox, geocoder_used = self._geocode_to_bbox(location_query)
 
         return VoxelExecutionContract(
             prompt=user_prompt,
@@ -279,7 +387,9 @@ Return ONLY a valid raw JSON object matching this schema with NO markdown backti
             target_band_count=int(target_band_count),
             priority_spectrum_domains=priority_domains,
             scorecard_weights=scorecard_weights,
-            user_summary=user_summary
+            user_summary=user_summary,
+            llm_provider=llm_provider_used,
+            geocoder=geocoder_used
         )
 
 
@@ -287,10 +397,9 @@ Return ONLY a valid raw JSON object matching this schema with NO markdown backti
 VoxelQueryCompiler = VoxelStageZeroParser
 
 
-# Direct script execution test
 if __name__ == "__main__":
     parser = VoxelStageZeroParser()
-    contract = parser.parse("Predict where highest rainfall accumulation will occur in South Mumbai")
+    contract = parser.parse("Analyze agricultural crop health and vegetation in Punjab")
     print("\n=== STAGE 0 EXECUTION CONTRACT ===")
     print(f"Location    : {contract.location_name}")
     print(f"BBOX        : {contract.bbox}")

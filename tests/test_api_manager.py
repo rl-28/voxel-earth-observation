@@ -14,6 +14,8 @@ class TestAPIManager(unittest.TestCase):
     def setUp(self):
         # Reset singleton instance between tests
         APIManager._instance = None
+        import utils.api_manager
+        utils.api_manager._global_api_manager = None
 
     def test_singleton_instance(self):
         """Verifies that APIManager follows the singleton pattern."""
@@ -47,7 +49,7 @@ class TestAPIManager(unittest.TestCase):
     }, clear=True)
     def test_key_getters_and_capabilities(self):
         """Verifies key getters and boolean capability checkers."""
-        mgr = APIManager()
+        mgr = APIManager(auto_load=False)
         self.assertTrue(mgr.has_gemini())
         self.assertEqual(mgr.get_gemini_key(), "AIzaSyD-test-gemini-key")
         self.assertTrue(mgr.has_mapbox())
@@ -61,7 +63,7 @@ class TestAPIManager(unittest.TestCase):
     }, clear=True)
     def test_llm_provider_fallback_order(self):
         """Verifies fallback to OpenAI when Gemini is not configured."""
-        mgr = APIManager()
+        mgr = APIManager(auto_load=False)
         self.assertFalse(mgr.has_gemini())
         self.assertTrue(mgr.has_openai())
         self.assertEqual(mgr.get_active_llm_provider(), "openai")
@@ -69,7 +71,7 @@ class TestAPIManager(unittest.TestCase):
     @patch.dict(os.environ, {}, clear=True)
     def test_offline_fallback_provider(self):
         """Verifies fallback to rule-based engine when all API keys are absent."""
-        mgr = APIManager()
+        mgr = APIManager(auto_load=False)
         self.assertFalse(mgr.has_llm_provider())
         self.assertEqual(mgr.get_active_llm_provider(), "rule_based_fallback")
 
@@ -90,7 +92,7 @@ class TestAPIManager(unittest.TestCase):
     @patch.dict(os.environ, {}, clear=True)
     def test_parser_integration_without_api_keys(self):
         """Verifies Stage 0 query compilation works seamlessly in offline mode."""
-        mgr = APIManager()
+        mgr = APIManager(auto_load=False)
         parser = VoxelStageZeroParser(api_manager=mgr)
         contract = parser.parse("Predict flood risk in South Mumbai")
 

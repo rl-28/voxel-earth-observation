@@ -383,30 +383,45 @@ The centralized API Management system (`utils/api_manager.py`) provides secure c
 
 ---
 
-## TERMINAL TEST BENCH & CLI TOOL
-An interactive command-line test tool (`scripts/demo_cli.py`) is provided for testing the pipeline directly in the terminal without starting the web UI.
+## TERMINAL TEST BENCH & INTERACTIVE CLI TOOL
+An interactive command-line test bench (`scripts/demo_cli.py`) is provided for testing arbitrary natural language queries, live OpenStreetMap/Google Maps geocoding, Stage 0 contracts, and Module 2 Whale Optimization directly from the terminal.
 
-### Run Default Test Bench:
+### 1. Launch Interactive REPL Mode (Type any query in real time):
 ```bash
 python scripts/demo_cli.py
 ```
+> Prompts you with an interactive loop (`Enter Earth Observation Query > `) where you can type ANY query worldwide, view live geocoded coordinates `[min_lon, min_lat, max_lon, max_lat]`, extracted band budgets, and real-time spectral band selections!
+> Type `examples` inside the loop for query inspiration, `status` for key diagnostics, or `exit` to quit.
 
-### Run with Custom Natural Language Queries:
+### 2. Direct Query CLI Execution:
+You can pass any custom query directly as a CLI argument:
 ```bash
-# Water & Flood Risk Analysis
-python scripts/demo_cli.py "Predict where highest rainfall accumulation and flood risk will occur in South Mumbai"
+# Agriculture / NDVI in Punjab
+python scripts/demo_cli.py "Assess wheat crop health, nitrogen stress, and vegetation indices across Punjab, India"
 
-# Agricultural Crop Health & NDVI
-python scripts/demo_cli.py "Analyze agricultural crop health and vegetation NDVI in Punjab"
+# Urban Heat & Building Sprawl in Tokyo
+python scripts/demo_cli.py "Analyze urban building sprawl and concrete heat island expansion in Tokyo, Japan"
 
-# Urban Infrastructure & Concrete Density
-python scripts/demo_cli.py "Evaluate building density and concrete expansion in Tokyo"
+# Tropical Rainforest Deforestation in the Amazon
+python scripts/demo_cli.py "Detect tropical rainforest deforestation and canopy loss in Amazon Basin, Para, Brazil"
+
+# Glaciology & Snow Cover in the Swiss Alps
+python scripts/demo_cli.py "Map snow cover extent and glacier retreat around Zermatt, Switzerland"
+
+# Coastal Flooding & Water Accumulation
+python scripts/demo_cli.py "Predict water accumulation, inundation zones, and flood risk around South Mumbai, India"
 ```
+
+### 3. Run Global Multi-Region Benchmark Showcase:
+```bash
+python scripts/demo_cli.py --batch
+```
+> Automatically benchmarks 5 distinct global biomes & domains (Agriculture, Urban, Water, Forestry, Glaciology) to compare live coordinates and domain-specific spectral channel reductions in a summary table.
 
 ---
 
 ## TEST SUITE EXECUTION
-Run the full unit and integration test suite (44 tests) via standard Python unittest:
+Run the full unit and integration test suite via standard Python unittest:
 ```bash
 python -m unittest discover -s tests -p "test_*.py"
 ```

@@ -53,7 +53,7 @@ class TestStageZeroParser(unittest.TestCase):
         self.assertIs(VoxelQueryCompiler, VoxelStageZeroParser)
 
     def test_default_geocoding_bbox_calculation(self):
-        bbox = self.parser._geocode_to_bbox("Unknown Remote Location 12345XYZ")
+        bbox, provider = self.parser._geocode_to_bbox("Unknown Remote Location 12345XYZ")
         expected_bbox = [
             round(DEFAULT_LON - BBOX_OFFSET, 4),
             round(DEFAULT_LAT - BBOX_OFFSET, 4),
