@@ -4,3 +4,5 @@ PyWavelets
 pystac-client
 pytest
 streamlit>=1.20.0
+google-generativeai
+geopy
