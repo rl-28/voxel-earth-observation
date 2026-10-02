@@ -30,32 +30,33 @@ Modern Earth observation produces large satellite datasets with many spectral ba
 
 ## SYSTEM ARCHITECTURE
 ```
-Raw Satellite Data
+Freeform Natural Language Query (e.g. "Assess flood risk in South Mumbai")
         ↓
-Module 1 — Arya
-Ingestion & Signal Processing
+Stage 0: Dynamic Intent & Spatial Geocoding Engine (Gemini / Nominatim)
         ↓
-(256,256,13) Float32
+VoxelExecutionContract: [BBOX, Task Type, Target Band Budget, Scorecard Weights]
         ↓
-Module 2 — Shreeya
-Band Optimization
+Stage 1: Module 1 — Ingestion & Signal Processing (STAC, Tiling, Z-Score, 3D-DWT, Albedo)
         ↓
-13-element Binary Mask
+Standardized Tensor (256, 256, 13) Float32
         ↓
-Module 3 — Riya
-CNN + ViT + XAI + FAISS
+Stage 2: Module 2 — Metaheuristic Optimization Core (Physics Partitioning, Chaotic Seeding + OBL, BWOA)
         ↓
-(1,1216) Dense Feature Vector
+Reduced Tensor (256, 256, k) + 13-element Binary Mask (60-70% FLOP & Data Volume Reduction)
         ↓
-Fast Retrieval
+Stage 3: Module 3 — Deep Learning & Neural Fusion (Hybrid CNN + Vision Transformer)
+        ↓
+Dense Feature Vector (1, 1216) + Explainable AI (SHAP / Integrated Gradients)
+        ↓
+Stage 4: FAISS High-Speed Vector Retrieval & Semantic Search
 ```
 
 ## TEAM STRUCTURE
 | Member | Module | Role | Main Responsibilities |
 |---|---|---|---|
-| Arya Suryavanshi | Module 1 | Ingestion & Signal Processing Lead | satellite data acquisition, GeoTIFF processing, CRS alignment, spatial tiling, Z-score preprocessing, 3D-DWT processing, albedo-related filtering, standardized output generation |
-| Shreeya Joshi | Module 2 | Optimization & Math Core Lead | spectral-band grouping, chaotic seeding, Opposition-Based Learning, Binary Whale Optimization / Enhanced Jaya, fitness scorecard, spectral band selection |
-| Riya Lepkar | Module 3 | Deep Learning & Search Architect | CNN backbone, Tiny Vision Transformer, CNN-ViT fusion, SHAP explainability, FAISS indexing/search |
+| Arya Suryavanshi | Module 1 | Ingestion & Signal Processing Lead | STAC satellite acquisition, GeoTIFF processing, CRS alignment, 256x256 tiling, Z-score preprocessing, 3D-DWT signal processing, albedo/glare filtering |
+| Shreeya Joshi | Module 2 | Optimization & Math Core Lead | Physics spectrum grouping, Chebyshev chaotic seeding, Opposition-Based Learning (OBL), Binary Whale Optimization Algorithm (BWOA), Green-AI fitness scorecard, domain balance guard |
+| Riya Lepkar | Module 3 | Deep Learning & Search Architect | Hybrid CNN backbone, Tiny Vision Transformer, CNN-ViT neural fusion, SHAP explainability, FAISS indexing/retrieval |
 
 ## GIT BRANCH STRATEGY
 The project uses separate feature branches for independent module development.
@@ -353,10 +354,70 @@ reduced_tensor, indices, metrics = apply_module2_band_selection(
 # Result: reduced_tensor has shape (256, 256, 4)
 ```
 
+## STAGE 0: NATURAL LANGUAGE QUERY COMPILER & GEOSPATIAL COMPILER
+Stage 0 (`utils/llm_parser.py`) translates unstructured, freeform human text into a strictly validated `VoxelExecutionContract` configuring downstream ingestion, optimization, and modeling.
+
+### 1. Architectural Flow
+1. **Semantic Intent Extraction**:
+   - Primary LLM: **Google Gemini 1.5 Flash** with JSON mode.
+   - Secondary Fallbacks: OpenAI (`gpt-4o-mini`) and Groq (`llama-3.1-8b-instant`).
+   - Offline Fallback: Deterministic keyword-boundary regex classifier.
+2. **Spatial Geocoding to BBOX**:
+   - Geocodes location queries via `Nominatim` (OpenStreetMap) with a `0.0125°` coordinate offset around center lat/lon (~2.56 km × 2.56 km spatial footprint matching 256×256 pixels at 10m/pixel Sentinel-2 resolution).
+   - Default offline fallback: South Mumbai, India (`[72.8075, 18.9375, 72.8325, 18.9625]`).
+3. **Task Profiles & Spectral Band Budgets**:
+   - `WATER_MOISTURE` (4 bands: SWIR-1 B11, SWIR-2 B12, NIR B08, Green B03)
+   - `CROP_HEALTH` (6 bands: Red-Edge B05–B07, NIR B08)
+   - `URBAN_INFRASTRUCTURE` (5 bands: Visible B02–B04, SWIR B11)
+   - `GENERAL_LANDCOVER` (8 bands: Visible, NIR, SWIR, Red-Edge)
+
+---
+
+## API MANAGEMENT & ENVIRONMENT SECURITY
+The centralized API Management system (`utils/api_manager.py`) provides secure credential sourcing, diagnostic inspection, and offline resilience:
+- **Environment Template (`.env.example`)**: Clean configuration template for all credentials.
+- **Git Security**: `.gitignore` strictly ignores `.env`, `.env.*`, `*.key`, `*.pem`, `secrets.json`, and geospatial binary rasters (`*.tif`, `*.jp2`, `*.nc`).
+- **Singleton `APIManager`**:
+  - `api_manager.get_gemini_key()`, `api_manager.has_gemini()`
+  - `api_manager.health_check()`: Returns service capability reports with safely masked keys (`AIza...2345`).
+
+---
+
+## TERMINAL TEST BENCH & CLI TOOL
+An interactive command-line test tool (`scripts/demo_cli.py`) is provided for testing the pipeline directly in the terminal without starting the web UI.
+
+### Run Default Test Bench:
+```bash
+python scripts/demo_cli.py
+```
+
+### Run with Custom Natural Language Queries:
+```bash
+# Water & Flood Risk Analysis
+python scripts/demo_cli.py "Predict where highest rainfall accumulation and flood risk will occur in South Mumbai"
+
+# Agricultural Crop Health & NDVI
+python scripts/demo_cli.py "Analyze agricultural crop health and vegetation NDVI in Punjab"
+
+# Urban Infrastructure & Concrete Density
+python scripts/demo_cli.py "Evaluate building density and concrete expansion in Tokyo"
+```
+
+---
+
+## TEST SUITE EXECUTION
+Run the full unit and integration test suite (44 tests) via standard Python unittest:
+```bash
+python -m unittest discover -s tests -p "test_*.py"
+```
+
+---
+
 ## PROJECT STATUS
 - Repository: FOUNDATION IN PROGRESS
 - Git Branch: feature/optimization-engine
 - Stage 0 — Query Parser & Geospatial Compiler: **COMPLETED**
+- API Management & Security Infrastructure: **COMPLETED**
 - Phase 1 — Spatial-Spectral Contract: **COMPLETED**
 - Phase 2 — Synthetic Dataset: **COMPLETED**
 - Phase 3 — STAC Downloader: **COMPLETED**
@@ -368,4 +429,5 @@ reduced_tensor, indices, metrics = apply_module2_band_selection(
 - Phase 9 — Out-of-Domain Evaluation Data Pipeline: **COMPLETED**
 - Phase 10 — Streamlit Frontend/Backend Integration: **COMPLETED**
 - Module 2 — Metaheuristic Optimization Core: **COMPLETED**
+
 
