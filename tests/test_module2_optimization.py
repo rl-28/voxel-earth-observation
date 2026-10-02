@@ -32,6 +32,10 @@ from module2_optimization.chaotic_seeding import (
     repair_population,
     generate_chaotic_population
 )
+from module2_optimization.bio_search import (
+    sigmoid_transfer_function,
+    binary_whale_optimization_search
+)
 
 
 class TestPhysicsPartitioning(unittest.TestCase):
@@ -118,7 +122,7 @@ class TestPhysicsPartitioning(unittest.TestCase):
             validate_input_tensor(np.zeros((128, 128, 13), dtype=np.float32))
 
         with self.assertRaises(ValueError):
-            validate_input_tensor(np.zeros((256, 256, 12), dtype=np.float32))
+            validate_input_tensor(np.zeros((256, 256), dtype=np.float32))
 
         inf_tensor = self.tensor_3d.copy()
         inf_tensor[0, 0, 0] = np.nan
@@ -237,18 +241,15 @@ class TestChaoticSeedingAndOBL(unittest.TestCase):
 
     def test_repair_mask_enforcement(self):
         """Verifies that repair_mask enforces 1 <= active_bands <= target_band_count."""
-        # 1. Test empty mask
         empty_mask = np.zeros(13, dtype=np.int32)
         repaired_empty = repair_mask(empty_mask, target_band_count=4)
         self.assertGreaterEqual(np.sum(repaired_empty), 1)
         self.assertLessEqual(np.sum(repaired_empty), 4)
 
-        # 2. Test over-budget mask (e.g. 10 bands active when target is 4)
         over_mask = np.ones(13, dtype=np.int32)
         repaired_over = repair_mask(over_mask, target_band_count=4)
         self.assertEqual(np.sum(repaired_over), 4)
 
-        # 3. Test within-budget mask (e.g. 3 bands active when target is 5)
         valid_mask = np.zeros(13, dtype=np.int32)
         valid_mask[[1, 3, 7]] = 1
         repaired_valid = repair_mask(valid_mask, target_band_count=5)
@@ -263,7 +264,6 @@ class TestChaoticSeedingAndOBL(unittest.TestCase):
         )
         self.assertEqual(pop.shape, (15, 13))
         self.assertTrue(np.all(np.isin(pop, [0, 1])))
-        # Check that all masks obey the budget
         sums = np.sum(pop, axis=1)
         self.assertTrue(np.all(sums >= 1))
         self.assertTrue(np.all(sums <= 6))
@@ -283,10 +283,81 @@ class TestChaoticSeedingAndOBL(unittest.TestCase):
             seed=42
         )
         self.assertEqual(pop_obl.shape, (10, 13))
-        # Ensure all individuals are within budget
         for ind in pop_obl:
             self.assertGreaterEqual(np.sum(ind), 1)
             self.assertLessEqual(np.sum(ind), 5)
+
+
+class TestBinaryWhaleOptimization(unittest.TestCase):
+    def setUp(self):
+        np.random.seed(42)
+        self.tensor = np.random.randn(256, 256, 13).astype(np.float32)
+        self.tensor[128:, :, 1] += 3.0  # B02
+        self.tensor[:, 128:, 7] += 4.0  # B08
+        self.evaluator = FitnessEvaluator(
+            tensor=self.tensor,
+            target_band_count=4,
+            seed=42,
+            n_subsample=400
+        )
+
+    def test_sigmoid_transfer_function(self):
+        """Validates sigmoid transfer function properties and bounds."""
+        v = np.array([-100.0, 0.0, 100.0])
+        s = sigmoid_transfer_function(v)
+        self.assertAlmostEqual(s[1], 0.5)
+        self.assertGreaterEqual(s[0], 0.0)
+        self.assertLessEqual(s[2], 1.0)
+
+    def test_bwoa_search_contract_and_budget(self):
+        """Verifies that BWOA returns 13-bit mask respecting target budget."""
+        best_mask, best_fitness, history = binary_whale_optimization_search(
+            evaluator=self.evaluator,
+            target_band_count=4,
+            pop_size=10,
+            max_iter=15,
+            seed=42
+        )
+        self.assertEqual(len(best_mask), 13)
+        self.assertTrue(np.all(np.isin(best_mask, [0, 1])))
+        self.assertGreaterEqual(np.sum(best_mask), 1)
+        self.assertLessEqual(np.sum(best_mask), 4)
+        self.assertIsInstance(best_fitness, float)
+
+    def test_bwoa_monotonic_history(self):
+        """Verifies that best fitness history is non-decreasing across iterations."""
+        _, _, history = binary_whale_optimization_search(
+            evaluator=self.evaluator,
+            target_band_count=4,
+            pop_size=10,
+            max_iter=15,
+            seed=42
+        )
+        self.assertGreater(len(history), 1)
+        for t in range(len(history) - 1):
+            self.assertGreaterEqual(history[t + 1], history[t])
+
+    def test_bwoa_result_superiority_or_equality(self):
+        """Verifies that optimized mask fitness is >= initial best seeded fitness."""
+        # Initial seed best
+        initial_pop = generate_chaotic_population(
+            num_agents=10,
+            target_band_count=4,
+            evaluator=self.evaluator,
+            seed=42
+        )
+        initial_best_score = max(self.evaluator.get_score(ind) for ind in initial_pop)
+
+        best_mask, best_fitness, history = binary_whale_optimization_search(
+            evaluator=self.evaluator,
+            target_band_count=4,
+            pop_size=10,
+            max_iter=15,
+            initial_population=initial_pop,
+            seed=42
+        )
+        self.assertGreaterEqual(best_fitness, initial_best_score)
+        self.assertEqual(history[0], initial_best_score)
 
 
 if __name__ == "__main__":

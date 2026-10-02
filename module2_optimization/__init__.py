@@ -16,6 +16,8 @@ from .config import (
     OVER_BUDGET_PENALTY_WEIGHT,
     DEFAULT_WOA_POP_SIZE,
     DEFAULT_WOA_MAX_ITER,
+    DEFAULT_WOA_SPIRAL_B,
+    DEFAULT_PATIENCE,
     DEFAULT_SEED
 )
 from .physics_partitioning import (
@@ -34,6 +36,10 @@ from .chaotic_seeding import (
     repair_population,
     generate_chaotic_population
 )
+from .bio_search import (
+    sigmoid_transfer_function,
+    binary_whale_optimization_search
+)
 
 __all__ = [
     "BAND_NAMES",
@@ -49,6 +55,8 @@ __all__ = [
     "OVER_BUDGET_PENALTY_WEIGHT",
     "DEFAULT_WOA_POP_SIZE",
     "DEFAULT_WOA_MAX_ITER",
+    "DEFAULT_WOA_SPIRAL_B",
+    "DEFAULT_PATIENCE",
     "DEFAULT_SEED",
     "validate_input_tensor",
     "partition_spectrum",
@@ -59,5 +67,7 @@ __all__ = [
     "chebyshev_map_sequence",
     "repair_mask",
     "repair_population",
-    "generate_chaotic_population"
+    "generate_chaotic_population",
+    "sigmoid_transfer_function",
+    "binary_whale_optimization_search"
 ]
