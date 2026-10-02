@@ -13,7 +13,10 @@ from .config import (
     HARD_RAM_PENALTY,
     DEFAULT_TARGET_BAND_COUNT,
     EMPTY_MASK_PENALTY,
-    OVER_BUDGET_PENALTY_WEIGHT
+    OVER_BUDGET_PENALTY_WEIGHT,
+    DEFAULT_WOA_POP_SIZE,
+    DEFAULT_WOA_MAX_ITER,
+    DEFAULT_SEED
 )
 from .physics_partitioning import (
     validate_input_tensor,
@@ -24,6 +27,12 @@ from .fitness_scorecard import (
     generate_pseudo_labels,
     compute_jm_distance,
     fast_knn_accuracy
+)
+from .chaotic_seeding import (
+    chebyshev_map_sequence,
+    repair_mask,
+    repair_population,
+    generate_chaotic_population
 )
 
 __all__ = [
@@ -38,10 +47,17 @@ __all__ = [
     "DEFAULT_TARGET_BAND_COUNT",
     "EMPTY_MASK_PENALTY",
     "OVER_BUDGET_PENALTY_WEIGHT",
+    "DEFAULT_WOA_POP_SIZE",
+    "DEFAULT_WOA_MAX_ITER",
+    "DEFAULT_SEED",
     "validate_input_tensor",
     "partition_spectrum",
     "FitnessEvaluator",
     "generate_pseudo_labels",
     "compute_jm_distance",
-    "fast_knn_accuracy"
+    "fast_knn_accuracy",
+    "chebyshev_map_sequence",
+    "repair_mask",
+    "repair_population",
+    "generate_chaotic_population"
 ]

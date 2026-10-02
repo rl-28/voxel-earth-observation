@@ -12,7 +12,9 @@ from module2_optimization.config import (
     INDEX_TO_BAND,
     SPECTRUM_DOMAINS,
     HARD_RAM_PENALTY,
-    EMPTY_MASK_PENALTY
+    EMPTY_MASK_PENALTY,
+    DEFAULT_WOA_POP_SIZE,
+    DEFAULT_TARGET_BAND_COUNT
 )
 from module2_optimization.physics_partitioning import (
     validate_input_tensor,
@@ -23,6 +25,12 @@ from module2_optimization.fitness_scorecard import (
     compute_jm_distance,
     fast_knn_accuracy,
     generate_pseudo_labels
+)
+from module2_optimization.chaotic_seeding import (
+    chebyshev_map_sequence,
+    repair_mask,
+    repair_population,
+    generate_chaotic_population
 )
 
 
@@ -110,7 +118,7 @@ class TestPhysicsPartitioning(unittest.TestCase):
             validate_input_tensor(np.zeros((128, 128, 13), dtype=np.float32))
 
         with self.assertRaises(ValueError):
-            validate_input_tensor(np.zeros((256, 256), dtype=np.float32))
+            validate_input_tensor(np.zeros((256, 256, 12), dtype=np.float32))
 
         inf_tensor = self.tensor_3d.copy()
         inf_tensor[0, 0, 0] = np.nan
@@ -121,9 +129,7 @@ class TestPhysicsPartitioning(unittest.TestCase):
 class TestFitnessScorecard(unittest.TestCase):
     def setUp(self):
         np.random.seed(42)
-        # Create a synthetic 256x256x13 tensor with clustered features
         self.tensor = np.random.randn(256, 256, 13).astype(np.float32)
-        # Add class separation in specific bands (B02, B03, B08, B11)
         self.tensor[128:, :, 1] += 3.0  # B02
         self.tensor[:, 128:, 7] += 4.0  # B08
 
@@ -143,11 +149,10 @@ class TestFitnessScorecard(unittest.TestCase):
 
     def test_over_budget_penalty(self):
         """Validates that masks exceeding target_band_count are penalized."""
-        # Budget = 4. Test mask with 4 bands vs mask with 10 bands
         within_budget_mask = np.zeros(13, dtype=np.int32)
-        within_budget_mask[[1, 2, 7, 11]] = 1  # 4 bands
+        within_budget_mask[[1, 2, 7, 11]] = 1
 
-        over_budget_mask = np.ones(13, dtype=np.int32)  # 13 bands
+        over_budget_mask = np.ones(13, dtype=np.int32)
 
         score_within = self.evaluator.get_score(within_budget_mask)
         score_over = self.evaluator.get_score(over_budget_mask)
@@ -178,7 +183,6 @@ class TestFitnessScorecard(unittest.TestCase):
         self.assertEqual(score1, score2)
         self.assertEqual(m1["accuracy"], m2["accuracy"])
         self.assertEqual(m1["jm_distance"], m2["jm_distance"])
-        # Check cache hits
         self.assertIn(mask.tobytes(), self.evaluator._cache)
 
     def test_ram_penalty_trigger(self):
@@ -188,7 +192,6 @@ class TestFitnessScorecard(unittest.TestCase):
             target_band_count=4,
             seed=42
         )
-        # Artificially set hard_ram_penalty to test trigger
         evaluator_ram.hard_ram_penalty = HARD_RAM_PENALTY
         mask = np.zeros(13, dtype=np.int32)
         mask[[1, 2, 7]] = 1
@@ -212,6 +215,78 @@ class TestFitnessScorecard(unittest.TestCase):
         fitness, metrics = evaluator_labeled.evaluate(mask)
         self.assertIsInstance(fitness, float)
         self.assertGreater(metrics["accuracy"], 0.0)
+
+
+class TestChaoticSeedingAndOBL(unittest.TestCase):
+    def setUp(self):
+        np.random.seed(42)
+        self.tensor = np.random.randn(256, 256, 13).astype(np.float32)
+        self.evaluator = FitnessEvaluator(
+            tensor=self.tensor,
+            target_band_count=5,
+            seed=42,
+            n_subsample=500
+        )
+
+    def test_chebyshev_map_bounds(self):
+        """Validates that Chebyshev map outputs bounded values in [-1, 1]."""
+        seq = chebyshev_map_sequence(length=100, seed=42)
+        self.assertEqual(len(seq), 100)
+        self.assertTrue(np.all(seq >= -1.0))
+        self.assertTrue(np.all(seq <= 1.0))
+
+    def test_repair_mask_enforcement(self):
+        """Verifies that repair_mask enforces 1 <= active_bands <= target_band_count."""
+        # 1. Test empty mask
+        empty_mask = np.zeros(13, dtype=np.int32)
+        repaired_empty = repair_mask(empty_mask, target_band_count=4)
+        self.assertGreaterEqual(np.sum(repaired_empty), 1)
+        self.assertLessEqual(np.sum(repaired_empty), 4)
+
+        # 2. Test over-budget mask (e.g. 10 bands active when target is 4)
+        over_mask = np.ones(13, dtype=np.int32)
+        repaired_over = repair_mask(over_mask, target_band_count=4)
+        self.assertEqual(np.sum(repaired_over), 4)
+
+        # 3. Test within-budget mask (e.g. 3 bands active when target is 5)
+        valid_mask = np.zeros(13, dtype=np.int32)
+        valid_mask[[1, 3, 7]] = 1
+        repaired_valid = repair_mask(valid_mask, target_band_count=5)
+        self.assertEqual(np.sum(repaired_valid), 3)
+
+    def test_generate_chaotic_population_shape_and_values(self):
+        """Validates output shape (num_agents, 13) and binary values {0, 1}."""
+        pop = generate_chaotic_population(
+            num_agents=15,
+            target_band_count=6,
+            seed=42
+        )
+        self.assertEqual(pop.shape, (15, 13))
+        self.assertTrue(np.all(np.isin(pop, [0, 1])))
+        # Check that all masks obey the budget
+        sums = np.sum(pop, axis=1)
+        self.assertTrue(np.all(sums >= 1))
+        self.assertTrue(np.all(sums <= 6))
+
+    def test_reproducibility_with_seed(self):
+        """Verifies that fixed seed produces identical populations."""
+        pop1 = generate_chaotic_population(num_agents=10, target_band_count=4, seed=123)
+        pop2 = generate_chaotic_population(num_agents=10, target_band_count=4, seed=123)
+        np.testing.assert_array_equal(pop1, pop2)
+
+    def test_obl_population_selection(self):
+        """Validates Opposition-Based Learning integration with FitnessEvaluator."""
+        pop_obl = generate_chaotic_population(
+            num_agents=10,
+            target_band_count=5,
+            evaluator=self.evaluator,
+            seed=42
+        )
+        self.assertEqual(pop_obl.shape, (10, 13))
+        # Ensure all individuals are within budget
+        for ind in pop_obl:
+            self.assertGreaterEqual(np.sum(ind), 1)
+            self.assertLessEqual(np.sum(ind), 5)
 
 
 if __name__ == "__main__":
