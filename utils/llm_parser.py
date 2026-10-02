@@ -104,11 +104,16 @@ class VoxelExecutionContract:
         }
 
 
-def _call_gemini_rest_api(api_key: str, system_prompt: str, model_name: str = "gemini-1.5-flash") -> Optional[Dict[str, Any]]:
+def _call_gemini_rest_api(api_key: str, system_prompt: str, model_name: str = "gemini-3.5-flash") -> Optional[Dict[str, Any]]:
     """
     Direct REST API client for Google Gemini without requiring third-party SDK dependencies.
+    Tries candidate active models (gemini-3.5-flash, gemini-3.7-flash, gemini-3.8-flash, gemini-flash-latest).
     """
-    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+    candidate_models = [model_name]
+    for alt in ["gemini-3.5-flash", "gemini-3.7-flash", "gemini-3.8-flash", "gemini-flash-latest"]:
+        if alt not in candidate_models:
+            candidate_models.append(alt)
+
     payload = {
         "contents": [
             {
@@ -120,28 +125,31 @@ def _call_gemini_rest_api(api_key: str, system_prompt: str, model_name: str = "g
         }
     }
 
-    try:
-        req = urllib.request.Request(
-            endpoint,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=12) as response:
-            result = json.loads(response.read().decode("utf-8"))
-            candidates = result.get("candidates", [])
-            if candidates:
-                content = candidates[0].get("content", {})
-                parts = content.get("parts", [])
-                if parts:
-                    raw_text = parts[0].get("text", "").strip()
-                    # Strip any possible markdown backticks
-                    if raw_text.startswith("```"):
-                        raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
-                        raw_text = re.sub(r"\n?```$", "", raw_text)
-                    return json.loads(raw_text)
-    except Exception as e:
-        logger.debug(f"Gemini REST call failed: {e}")
-        return None
+    for m in candidate_models:
+        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
+        try:
+            req = urllib.request.Request(
+                endpoint,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=12) as response:
+                result = json.loads(response.read().decode("utf-8"))
+                candidates = result.get("candidates", [])
+                if candidates:
+                    content = candidates[0].get("content", {})
+                    parts = content.get("parts", [])
+                    if parts:
+                        raw_text = parts[0].get("text", "").strip()
+                        # Strip any possible markdown backticks
+                        if raw_text.startswith("```"):
+                            raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
+                            raw_text = re.sub(r"\n?```$", "", raw_text)
+                        return json.loads(raw_text)
+        except Exception as e:
+            logger.debug(f"Gemini REST call failed for model {m}: {e}")
+            continue
+
     return None
 
 
@@ -221,7 +229,7 @@ class VoxelStageZeroParser:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model_name: str = "gemini-1.5-flash",
+        model_name: str = "gemini-3.5-flash",
         api_manager: Optional[Any] = None
     ):
         self.api_mgr = api_manager or get_api_manager()

@@ -173,15 +173,24 @@ def run_batch_showcase():
 
 def interactive_repl():
     """Interactive Command Line Loop for testing arbitrary custom queries."""
-    print("\n" + "*" * 78)
-    print("  VOXEL INTERACTIVE QUERY REPL")
-    print("  Type any natural language query and press Enter.")
-    print("  Commands: 'examples' (show ideas), 'status' (view API keys), 'exit' or 'q' (quit)")
-    print("*" * 78 + "\n")
+    print("\n" + "=" * 78)
+    print("  VOXEL LIVE INTERACTIVE QUERY CONSOLE")
+    print("=" * 78)
+    print("  [INFO] You can type ANY custom query for ANY city, region, or biome worldwide.")
+    print("  [INFO] The system will geocode the real coordinates live and select optimal bands.")
+    print("  ----------------------------------------------------------------------------")
+    print("  Commands you can type:")
+    print("    * 'examples' : View sample real-world queries across domains")
+    print("    * 'batch'    : Run multi-region showcase benchmark (Punjab, Tokyo, Mumbai, etc.)")
+    print("    * 'status'   : Check API key configuration status")
+    print("    * 'exit'/'q' : Quit interactive session")
+    print("=" * 78 + "\n")
 
     while True:
         try:
-            user_input = input("Enter Earth Observation Query > ").strip()
+            print("----------------------------------------------------------------------------")
+            print("👉 TYPE YOUR QUERY BELOW (e.g., 'Assess crop health in Punjab') and press ENTER:")
+            user_input = input("Query > ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\nExiting interactive test bench. Goodbye!")
             break
