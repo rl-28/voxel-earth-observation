@@ -18,7 +18,9 @@ if sys.platform == "win32":
         pass
 
 from inference import predict_and_search, LAND_COVER_CLASSES
-from tests.mock_handshake import generate_mock_batch, generate_band_mask, SENTINEL2_BANDS
+from tests.mock_handshake import generate_mock_batch
+from utils.band_mask import load_band_mask, describe_band_mask
+from config.constants import SENTINEL2_BANDS
 
 
 def main():
@@ -37,7 +39,8 @@ def main():
     # 2. Mock Handshake Sentinel-2 Tile Input
     print("-" * 80)
     print("Generating incoming Sentinel-2 L2A tile (13 bands, 256x256 spatial resolution)...")
-    tiles, _, mask = generate_mock_batch(batch_size=1, seed=777)
+    tiles, _, _ = generate_mock_batch(batch_size=1, seed=777)
+    mask = load_band_mask()
     test_tile = tiles[0]
 
     active_indices = torch.nonzero(mask > 0.5, as_tuple=False).squeeze(-1).tolist()

@@ -11,6 +11,14 @@ from typing import Optional, Tuple, Union
 
 from models.cnn_backbone import XNANet
 from models.vit_transformer import Tiny32ViT
+from config.constants import (
+    CNN_FEATURE_DIM,
+    DEFAULT_SELECTED_BAND_INDICES,
+    EMBEDDING_DIM,
+    NUM_BANDS,
+    NUM_CLASSES,
+    VIT_FEATURE_DIM,
+)
 
 
 class FusionNet(nn.Module):

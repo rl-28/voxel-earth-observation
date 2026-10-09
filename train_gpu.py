@@ -31,7 +31,9 @@ if sys.platform == "win32":
         pass
 
 from models.fusion_net import FusionNet
-from tests.mock_handshake import generate_mock_batch, generate_band_mask, SENTINEL2_BANDS
+from tests.mock_handshake import generate_mock_batch
+from utils.band_mask import load_band_mask, describe_band_mask
+from config.constants import SENTINEL2_BANDS, NUM_CLASSES, NUM_BANDS
 from explainability.faiss_search import SpatialVectorSearchEngine, query_similar_terrain
 from explainability.shap_engine import run_explainability_pipeline
 
@@ -176,6 +178,7 @@ def run_full_module3_pipeline(
     weight_decay: float = 1e-2,
     num_classes: int = 10,
     checkpoint_dir: str = "checkpoints",
+    mask_path: Optional[str] = None,
 ):
     print("=" * 80)
     print(" [VOXEL MODULE 3] GPU BENCHMARK TRAINING & EXPLAINABILITY PIPELINE")
@@ -203,16 +206,19 @@ def run_full_module3_pipeline(
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    # 3. Band Selection Mask from Module 2 (6 active bands)
-    band_mask = generate_band_mask().to(device)
+    # 3. Band Selection Mask from Module 2 (pluggable loader)
+    band_mask = load_band_mask(mask_path).to(device)
     active_indices = torch.nonzero(band_mask > 0.5, as_tuple=False).squeeze(-1).tolist()
+    if isinstance(active_indices, int):
+        active_indices = [active_indices]
     active_bands = len(active_indices)
     print(f"Selected Band Mask:       {active_bands} active bands ({active_indices})")
+    print(f"Active Spectral Bands:    {describe_band_mask(band_mask)}")
 
     # 4. Instantiate FusionNet
     model = FusionNet(
         num_classes=num_classes,
-        total_bands=13,
+        total_bands=NUM_BANDS,
         selected_channels=active_bands,
         cnn_feature_dim=1024,
         vit_feature_dim=192,
@@ -362,6 +368,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", type=int, default=5, help="Benchmark training epochs")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
+    parser.add_argument("--mask_path", type=str, default=None, help="Path to band mask file (.json, .npy, .pt)")
     args = parser.parse_args()
 
-    run_full_module3_pipeline(epochs=args.epochs, batch_size=args.batch_size)
+    run_full_module3_pipeline(
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        mask_path=args.mask_path,
+    )
