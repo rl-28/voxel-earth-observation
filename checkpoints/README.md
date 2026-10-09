@@ -1,7 +1,8 @@
 # VOXEL Module 3 Checkpoints & Artifacts Directory
 
 > [!WARNING]
-> **PLACEHOLDER ARTIFACT NOTICE:**
+> **PLACEHOLDER - generated from random mock data, not valid results; regenerate after real training**
+>
 > The binary files and visualizations currently stored in this directory (`best_fusion_net.pth`, `terrain_index.faiss`, `terrain_index.faiss.meta.json`, `shap_band_importance.png`) were generated using synthetic / mock data during Module 3 pipeline hardening.
 > **They must be regenerated after training on real satellite data once Module 1 (Data Ingestion) and Module 2 (Band Optimization) are integrated.**
 
@@ -11,10 +12,10 @@
 
 | Filename | Description | Status |
 | :--- | :--- | :--- |
-| `best_fusion_net.pth` | Fused CNN-ViT model checkpoint weights, optimizer state, registered band mask, class list, and git commit metadata. | Mock Placeholder (To be retrained) |
-| `terrain_index.faiss` | FAISS vector database storing 1216-dim normalized embeddings for similarity retrieval. | Mock Placeholder (To be regenerated) |
-| `terrain_index.faiss.meta.json` | Metadata mapping vector indices to tile identifiers, true classes, predicted classes, and coordinates. | Mock Placeholder (To be regenerated) |
-| `shap_band_importance.png` | Publication-ready horizontal bar chart quantifying Permutation SHAP spectral attribution. | Mock Placeholder (To be regenerated) |
+| `best_fusion_net.pth` | Fused CNN-ViT model checkpoint weights, optimizer state, registered band mask, class list, and git commit metadata. | PLACEHOLDER - generated from random mock data, not valid results; regenerate after real training |
+| `terrain_index.faiss` | FAISS vector database storing 1216-dim normalized embeddings for similarity retrieval. | PLACEHOLDER - generated from random mock data, not valid results; regenerate after real training |
+| `terrain_index.faiss.meta.json` | Metadata mapping vector indices to tile identifiers, true classes, predicted classes, and coordinates. | PLACEHOLDER - generated from random mock data, not valid results; regenerate after real training |
+| `shap_band_importance.png` | Publication-ready horizontal bar chart quantifying Permutation SHAP spectral attribution. | PLACEHOLDER - generated from random mock data, not valid results; regenerate after real training |
 | `splits.json` | Exact tile paths partitioned into reproducible `train`, `val`, and `test` splits. | Generated on training run |
 
 ---
