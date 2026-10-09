@@ -342,3 +342,65 @@ def partition_manifest(
             json.dump(splits_record, f, indent=2)
 
     return train_df, val_df, test_df
+
+
+def create_split_datasets(
+    manifest_path: str,
+    data_dir: Optional[str] = None,
+    label_map_path: Optional[str] = None,
+    val_ratio: float = 0.15,
+    test_ratio: float = 0.15,
+    seed: int = 42,
+    splits_save_path: Optional[str] = "checkpoints/splits.json",
+    scale_divisor: float = DEFAULT_SCALE_DIVISOR,
+    target_size: int = TILE_SIZE,
+) -> Tuple[RealSentinel2Dataset, RealSentinel2Dataset, RealSentinel2Dataset]:
+    """
+    Creates train, val, and test RealSentinel2Dataset instances from a manifest CSV file.
+    Applies SpatialAugmentation to train split only.
+    """
+    if data_dir is None:
+        data_dir = os.path.dirname(os.path.abspath(manifest_path))
+
+    df = pd.read_csv(manifest_path)
+    train_df, val_df, test_df = partition_manifest(
+        manifest_df=df,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio,
+        seed=seed,
+        splits_output_path=splits_save_path,
+    )
+
+    label_map_dict = None
+    if label_map_path and os.path.exists(label_map_path):
+        with open(label_map_path, "r", encoding="utf-8") as f:
+            label_map_dict = json.load(f)
+
+    train_ds = RealSentinel2Dataset(
+        manifest_df=train_df,
+        data_dir=data_dir,
+        scale_divisor=scale_divisor,
+        label_map=label_map_dict,
+        split="train",
+        augment=True,
+        target_size=target_size,
+    )
+    val_ds = RealSentinel2Dataset(
+        manifest_df=val_df,
+        data_dir=data_dir,
+        scale_divisor=scale_divisor,
+        label_map=label_map_dict,
+        split="val",
+        augment=False,
+        target_size=target_size,
+    )
+    test_ds = RealSentinel2Dataset(
+        manifest_df=test_df,
+        data_dir=data_dir,
+        scale_divisor=scale_divisor,
+        label_map=label_map_dict,
+        split="test",
+        augment=False,
+        target_size=target_size,
+    )
+    return train_ds, val_ds, test_ds

@@ -25,14 +25,15 @@ from config.constants import LAND_COVER_CLASSES
 _CACHED_MODEL = None
 _CACHED_MASK = None
 _CACHED_DEVICE = None
+_CACHED_CLASSES = None
 
 
 def load_model(
     checkpoint_path: str = "checkpoints/best_fusion_net.pth",
     device: Optional[str] = None,
 ) -> Tuple[FusionNet, torch.Tensor, torch.device]:
-    """Loads and caches the trained FusionNet model and registered band mask."""
-    global _CACHED_MODEL, _CACHED_MASK, _CACHED_DEVICE
+    """Loads and caches the trained FusionNet model and registered band mask from checkpoint."""
+    global _CACHED_MODEL, _CACHED_MASK, _CACHED_DEVICE, _CACHED_CLASSES
 
     if device is None:
         device_obj = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -49,12 +50,15 @@ def load_model(
     mask = checkpoint.get("band_mask", None)
     if mask is not None:
         mask = mask.to(device_obj)
-        active_channels = int(mask.sum().item())
+        active_channels = checkpoint.get("selected_channels", int(mask.sum().item()))
     else:
-        active_channels = 6
+        active_channels = checkpoint.get("selected_channels", 6)
+
+    class_list = checkpoint.get("class_list", LAND_COVER_CLASSES)
+    _CACHED_CLASSES = class_list
 
     model = FusionNet(
-        num_classes=len(LAND_COVER_CLASSES),
+        num_classes=len(class_list),
         total_bands=13,
         selected_channels=active_channels,
         cnn_feature_dim=1024,
@@ -120,8 +124,9 @@ def predict_and_search(
         logits, embedding = model(tile_tensor, mask=band_mask, return_embedding=True)
         probs = torch.softmax(logits, dim=-1).squeeze(0)  # (num_classes,)
 
+    class_list = _CACHED_CLASSES if _CACHED_CLASSES is not None else LAND_COVER_CLASSES
     pred_class_id = int(torch.argmax(probs).item())
-    pred_class_name = LAND_COVER_CLASSES[pred_class_id]
+    pred_class_name = class_list[pred_class_id] if 0 <= pred_class_id < len(class_list) else f"Class_{pred_class_id}"
     confidence_pct = float(probs[pred_class_id].item() * 100.0)
     embedding_np = embedding.squeeze(0).cpu().numpy()  # (1216,)
 
@@ -134,6 +139,12 @@ def predict_and_search(
 
     similar_tiles = []
     for rank, (score, idx, meta) in enumerate(zip(scores, indices, metadata), 1):
+        retrieved_class_id = meta.get("true_class", -1)
+        retrieved_class_name = (
+            class_list[retrieved_class_id]
+            if 0 <= retrieved_class_id < len(class_list)
+            else "N/A"
+        )
         similar_tiles.append(
             {
                 "rank": rank,
@@ -141,10 +152,8 @@ def predict_and_search(
                 "index": int(idx),
                 "tile_id": meta.get("tile_id", f"TILE_{idx}"),
                 "split": meta.get("split", "unknown"),
-                "class_id": meta.get("true_class", -1),
-                "class_name": LAND_COVER_CLASSES[meta["true_class"]]
-                if 0 <= meta.get("true_class", -1) < len(LAND_COVER_CLASSES)
-                else "N/A",
+                "class_id": retrieved_class_id,
+                "class_name": retrieved_class_name,
             }
         )
 
@@ -153,8 +162,8 @@ def predict_and_search(
         "predicted_class_name": pred_class_name,
         "confidence": confidence_pct,
         "all_probabilities": {
-            LAND_COVER_CLASSES[i]: float(probs[i].item() * 100.0)
-            for i in range(len(LAND_COVER_CLASSES))
+            class_list[i]: float(probs[i].item() * 100.0)
+            for i in range(len(class_list))
         },
         "embedding": embedding_np,
         "similar_terrain": similar_tiles,

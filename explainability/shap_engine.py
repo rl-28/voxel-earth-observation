@@ -6,6 +6,7 @@ to quantify and visualize feature importance across all active spectral bands.
 
 import os
 import sys
+from typing import Optional, Tuple, Dict, List, Any
 import torch
 import numpy as np
 import matplotlib
@@ -20,7 +21,44 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from tests.mock_handshake import SENTINEL2_BANDS
+from config.constants import SENTINEL2_BANDS, NUM_BANDS, NUM_CLASSES, LAND_COVER_CLASSES
+
+
+def load_model_and_mask(
+    checkpoint_path: str = "checkpoints/best_fusion_net.pth",
+    device: Optional[str] = None,
+):
+    """Loads FusionNet model and registered band_mask dynamically from checkpoint."""
+    from models.fusion_net import FusionNet
+
+    if device is None:
+        device_obj = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device_obj = torch.device(device)
+
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint not found at: {checkpoint_path}")
+
+    checkpoint = torch.load(checkpoint_path, map_location=device_obj, weights_only=False)
+    mask = checkpoint.get("band_mask", None)
+    if mask is not None:
+        mask = mask.to(device_obj)
+        active_channels = checkpoint.get("selected_channels", int(mask.sum().item()))
+    else:
+        active_channels = checkpoint.get("selected_channels", 6)
+
+    class_list = checkpoint.get("class_list", LAND_COVER_CLASSES)
+    model = FusionNet(
+        num_classes=len(class_list),
+        total_bands=NUM_BANDS,
+        selected_channels=active_channels,
+        cnn_feature_dim=1024,
+        vit_feature_dim=192,
+    ).to(device_obj)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.eval()
+
+    return model, mask, device_obj
 
 
 def compute_permutation_shap_attributions(
@@ -172,11 +210,22 @@ def run_explainability_pipeline(
 
 if __name__ == "__main__":
     from models.fusion_net import FusionNet
-    from tests.mock_handshake import generate_mock_batch, generate_band_mask
+    from tests.mock_handshake import generate_mock_batch
+    from utils.band_mask import load_band_mask
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    images, _, mask = generate_mock_batch(batch_size=8, device=device)
-    model = FusionNet(num_classes=10, selected_channels=int(mask.sum().item())).to(device)
+    ckpt_path = "checkpoints/best_fusion_net.pth"
+
+    if os.path.exists(ckpt_path):
+        print(f"[SHAP] Loading trained model and mask from checkpoint: {ckpt_path}")
+        model, mask, device_obj = load_model_and_mask(ckpt_path, device=device)
+        device = device_obj.type
+    else:
+        print("[SHAP] Checkpoint not found; initializing model with default mask...")
+        mask = load_band_mask().to(device)
+        model = FusionNet(num_classes=10, selected_channels=int(mask.sum().item())).to(device)
+
+    images, _, _ = generate_mock_batch(batch_size=8, device=device)
 
     run_explainability_pipeline(
         model=model,

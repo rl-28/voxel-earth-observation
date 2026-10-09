@@ -4,6 +4,7 @@ Executes an end-to-end forward prediction and FAISS vector retrieval query
 on the NVIDIA RTX 3050 GPU, outputting a clean engineering summary.
 """
 
+import os
 import sys
 import time
 import torch
@@ -17,7 +18,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from inference import predict_and_search, LAND_COVER_CLASSES
+from inference import predict_and_search, load_model, LAND_COVER_CLASSES
 from tests.mock_handshake import generate_mock_batch
 from utils.band_mask import load_band_mask, describe_band_mask
 from config.constants import SENTINEL2_BANDS
@@ -40,8 +41,15 @@ def main():
     print("-" * 80)
     print("Generating incoming Sentinel-2 L2A tile (13 bands, 256x256 spatial resolution)...")
     tiles, _, _ = generate_mock_batch(batch_size=1, seed=777)
-    mask = load_band_mask()
     test_tile = tiles[0]
+
+    checkpoint_path = "checkpoints/best_fusion_net.pth"
+    if os.path.exists(checkpoint_path):
+        _, mask, _ = load_model(checkpoint_path)
+        print(f"Loaded Checkpoint:         {checkpoint_path} (reading mask and channel count)")
+    else:
+        mask = load_band_mask()
+        print("Using default band mask (checkpoint not found)")
 
     active_indices = torch.nonzero(mask > 0.5, as_tuple=False).squeeze(-1).tolist()
     active_names = [SENTINEL2_BANDS[i].split()[0] for i in active_indices]
@@ -53,7 +61,7 @@ def main():
     print("-" * 80)
     print("Executing GPU Forward Pass and FAISS Similarity Retrieval...")
     t0 = time.perf_counter()
-    result = predict_and_search(test_tile, band_mask=mask, top_k=5)
+    result = predict_and_search(test_tile, band_mask=mask, top_k=5, checkpoint_path=checkpoint_path)
     total_time_ms = (time.perf_counter() - t0) * 1000.0
 
     # 4. Display Results
