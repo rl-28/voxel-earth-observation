@@ -208,29 +208,65 @@ def run_explainability_pipeline(
     return attributions
 
 
-if __name__ == "__main__":
-    from models.fusion_net import FusionNet
-    from tests.mock_handshake import generate_mock_batch
-    from utils.band_mask import load_band_mask
+def run_explainability_from_loader(
+    model: torch.nn.Module,
+    dataloader: Any,
+    mask: torch.Tensor,
+    output_plot: str = "checkpoints/shap_band_importance.png",
+    num_samples: int = 16,
+    num_permutations: int = 10,
+    device: str = "cuda",
+) -> dict:
+    """
+    Computes Permutation SHAP channel attribution scores using real validation tiles from a DataLoader.
+    """
+    sample_images_list = []
+    collected = 0
+    for imgs, _ in dataloader:
+        sample_images_list.append(imgs)
+        collected += imgs.size(0)
+        if collected >= num_samples:
+            break
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    ckpt_path = "checkpoints/best_fusion_net.pth"
+    if not sample_images_list:
+        raise ValueError("DataLoader is empty, cannot compute SHAP attributions.")
 
-    if os.path.exists(ckpt_path):
-        print(f"[SHAP] Loading trained model and mask from checkpoint: {ckpt_path}")
-        model, mask, device_obj = load_model_and_mask(ckpt_path, device=device)
-        device = device_obj.type
-    else:
-        print("[SHAP] Checkpoint not found; initializing model with default mask...")
-        mask = load_band_mask().to(device)
-        model = FusionNet(num_classes=10, selected_channels=int(mask.sum().item())).to(device)
-
-    images, _, _ = generate_mock_batch(batch_size=8, device=device)
-
-    run_explainability_pipeline(
+    sample_images = torch.cat(sample_images_list, dim=0)[:num_samples]
+    return run_explainability_pipeline(
         model=model,
-        sample_images=images,
+        sample_images=sample_images,
         mask=mask,
-        output_plot="checkpoints/shap_band_importance.png",
+        output_plot=output_plot,
         device=device,
     )
+
+
+if __name__ == "__main__":
+    import argparse
+    from data.datasets import create_split_datasets
+    from torch.utils.data import DataLoader
+
+    parser = argparse.ArgumentParser(description="VOXEL Module 3: SHAP Spectral Attribution")
+    parser.add_argument("--checkpoint", type=str, default="checkpoints/best_fusion_net.pth", help="Checkpoint path")
+    parser.add_argument("--manifest", type=str, default=None, help="Manifest CSV path")
+    parser.add_argument("--data_dir", type=str, default=None, help="Data directory")
+    parser.add_argument("--mask_path", type=str, default=None, help="Mask path")
+    parser.add_argument("--output_plot", type=str, default="checkpoints/shap_band_importance.png", help="Output PNG")
+    parser.add_argument("--device", type=str, default="auto", help="Compute device")
+    args = parser.parse_args()
+
+    device_str = "cuda" if (args.device == "auto" and torch.cuda.is_available()) else ("cpu" if args.device == "auto" else args.device)
+    model, mask, dev = load_model_and_mask(args.checkpoint, device=device_str)
+
+    if args.manifest and os.path.exists(args.manifest):
+        _, val_ds, _ = create_split_datasets(manifest_path=args.manifest, data_dir=args.data_dir)
+        loader = DataLoader(val_ds, batch_size=8, shuffle=False)
+        run_explainability_from_loader(
+            model=model,
+            dataloader=loader,
+            mask=mask,
+            output_plot=args.output_plot,
+            device=device_str,
+        )
+    else:
+        print("[SHAP] Manifest not provided. Please provide --manifest <path> to run SHAP on satellite validation tiles.")

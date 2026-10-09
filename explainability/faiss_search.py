@@ -179,43 +179,72 @@ def query_similar_terrain(
     return scores[0], indices[0], results[0], latency_ms
 
 
+def build_faiss_index_from_dataloader(
+    model: torch.nn.Module,
+    dataloader: Any,
+    mask: torch.Tensor,
+    device: torch.device,
+    index_save_path: str = "checkpoints/terrain_index.faiss",
+    dim: int = 1216,
+) -> Tuple[str, int]:
+    """
+    Extracts 1216-dim embeddings across a DataLoader and builds/persists the FAISS index.
+    """
+    model.eval()
+    mask = mask.to(device)
+    engine = SpatialVectorSearchEngine(dim=dim, metric="cosine")
+
+    all_embeddings = []
+    all_metadata = []
+    tile_counter = 0
+
+    with torch.no_grad():
+        for batch_idx, (images, targets) in enumerate(dataloader):
+            images = images.to(device)
+            logits, embs = model(images, mask=mask, return_embedding=True)
+            preds = torch.argmax(logits, dim=1).cpu().numpy()
+            embs_np = embs.cpu().numpy()
+
+            for i in range(images.size(0)):
+                all_embeddings.append(embs_np[i])
+                meta_item = {
+                    "tile_id": f"TILE_{tile_counter:04d}",
+                    "true_class": int(targets[i].item()),
+                    "predicted_class": int(preds[i]),
+                }
+                # If dataset has records with extra columns, include them
+                if hasattr(dataloader.dataset, "records") and tile_counter < len(dataloader.dataset.records):
+                    row = dataloader.dataset.records.iloc[tile_counter]
+                    if "location_id" in row:
+                        meta_item["location_id"] = str(row["location_id"])
+                    if "tile_path" in row:
+                        meta_item["tile_path"] = str(row["tile_path"])
+
+                all_metadata.append(meta_item)
+                tile_counter += 1
+
+    if len(all_embeddings) == 0:
+        raise ValueError("DataLoader yielded 0 tiles; cannot build FAISS index.")
+
+    embeddings_arr = np.array(all_embeddings, dtype=np.float32)
+    indexed_count = engine.add_embeddings(embeddings_arr, all_metadata)
+    engine.save_index(index_save_path)
+
+    return index_save_path, indexed_count
+
+
 if __name__ == "__main__":
-    print("=" * 65)
-    print(" [FAISS] INITIALIZING 1216-DIM VECTOR RETRIEVAL ENGINE")
-    print("=" * 65)
+    import argparse
+    from inference import load_model
 
-    search_engine = SpatialVectorSearchEngine(dim=1216, metric="cosine")
+    parser = argparse.ArgumentParser(description="VOXEL Module 3: FAISS Vector Retrieval Engine")
+    parser.add_argument("--index_path", type=str, default="checkpoints/terrain_index.faiss", help="Path to index file")
+    parser.add_argument("--query_tile", type=str, default=None, help="Path to query tile tensor")
+    parser.add_argument("--top_k", type=int, default=5, help="Number of nearest tiles")
+    args = parser.parse_args()
 
-    # Generate 100 mock 1216-dim scene embeddings
-    np.random.seed(42)
-    mock_vectors = np.random.randn(100, 1216).astype(np.float32)
-    mock_metadata = [
-        {
-            "tile_id": f"S2A_MSIL2A_TILE_{i:03d}",
-            "land_cover_class": f"Class_{i % 10}",
-            "lat": 19.0 + (i * 0.01),
-            "lon": 72.8 + (i * 0.01),
-        }
-        for i in range(100)
-    ]
-
-    indexed_count = search_engine.add_embeddings(mock_vectors, mock_metadata)
-    os.makedirs("checkpoints", exist_ok=True)
-    test_index_file = "checkpoints/terrain_index.faiss"
-    search_engine.save_index(test_index_file)
-    print(f"Indexed Vectors:         {indexed_count} scenes (saved to {test_index_file})")
-
-    # Perform a query search via query_similar_terrain
-    query_vector = mock_vectors[0] + np.random.normal(0, 0.05, 1216).astype(np.float32)
-    scores, indices, results, latency_ms = query_similar_terrain(query_vector, top_k=5, index_path=test_index_file)
-
-    print(f"Retrieval Latency:       {latency_ms:.3f} ms (sub-millisecond search)")
-    print("-" * 65)
-    print("Top-5 Most Similar Spatial Scenes:")
-    for rank, (score, idx, meta) in enumerate(zip(scores, indices, results), 1):
-        print(
-            f"  Rank {rank}: Score={score:.4f} | Index={idx} | ID={meta.get('tile_id')} | "
-            f"Class={meta.get('land_cover_class')} | Coord=({meta.get('lat', 0):.3f}, {meta.get('lon', 0):.3f})"
-        )
-    print("=" * 65)
-    print("FAISS vector retrieval engine verified successfully!")
+    if os.path.exists(args.index_path):
+        engine = get_default_engine(args.index_path)
+        print(f"[FAISS] Loaded existing index: {args.index_path} ({engine.index.ntotal} vectors indexed)")
+    else:
+        print(f"[FAISS] Index not found at {args.index_path}. Build it via build_explainability.py.")
