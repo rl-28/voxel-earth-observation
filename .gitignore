@@ -4,19 +4,25 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Testing caches
+.pytest_cache/
+
+# Experiment results and datasets
+results/
+data/
+data/fake_dataset/
+
 # PyTorch checkpoints and Vector Database artifacts
 *.pth
 *.pt
 *.pth.tar
 *.faiss
+checkpoints/splits.json
 
-# Data and Experiment Results
-data/
-results/
+# Virtual environments
 .venv/
 venv/
 env/
-.pytest_cache/
 
 # IDE / Editor
 .vscode/
