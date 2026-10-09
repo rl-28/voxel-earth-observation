@@ -62,11 +62,12 @@ def generate_fake_dataset(
         # Alternate between .npy (first half) and .tif (second half)
         use_npy = (i < num_samples // 2) or not HAS_RASTERIO
 
-        # Deterministic split allocation
-        if i % 5 == 0:
-            split = "test"
-        elif i % 5 == 1:
+        # Stratified split allocation ensuring all classes exist across train, val, and test
+        class_instance = i // NUM_CLASSES
+        if class_instance == 0:
             split = "val"
+        elif class_instance == 1:
+            split = "test"
         else:
             split = "train"
 
