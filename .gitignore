@@ -1,10 +1,23 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
+*.pyc
 *.py[cod]
 *$py.class
 
-# PyTorch checkpoints
+# PyTorch checkpoints and Vector Database artifacts
+*.pth
+*.pt
 *.pth.tar
+*.faiss
 
-# Generated fake data
-data/fake_dataset/
+# Data and Experiment Results
+data/
+results/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# IDE / Editor
+.vscode/
+.idea/

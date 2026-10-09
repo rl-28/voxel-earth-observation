@@ -119,3 +119,9 @@ To ensure smooth integration across modules, be aware of known package sensitivi
 - **`GDAL` / `rasterio`**: On Windows, install pre-compiled binary wheels or use `pip install rasterio`. Avoid conda-gdal mixing.
 - **`mealpy`**: Optimization algorithms must output standard JSON or NumPy arrays to hand off to Module 3 without requiring `mealpy` in inference environments.
 - **`shap` / `numba`**: Pinned to `shap==0.49.1` and `numba==0.68.0` on Python 3.10.
+
+---
+
+## 7. Large File & Checkpoint Storage (Git LFS Recommendation)
+- Model checkpoints (`best_fusion_net.pth`, ~197 MB) and FAISS binary indices exceed GitHub's standard 100 MB file limit.
+- **Recommendation:** If versioning binary model weights in remote Git repositories, configure **Git LFS** (`git lfs track "*.pth" "*.faiss"`). By default in this repository, binary weights are untracked in `.gitignore` to avoid repository bloat and merge conflicts.
