@@ -20,19 +20,7 @@ if sys.platform == "win32":
 
 from models.fusion_net import FusionNet
 from explainability.faiss_search import query_similar_terrain
-
-LAND_COVER_CLASSES = [
-    "Annual Crop",
-    "Forest",
-    "Herbaceous Vegetation",
-    "Highway / Infrastructure",
-    "Industrial Area",
-    "Pasture",
-    "Permanent Crop",
-    "Residential Area",
-    "River / Inland Water",
-    "Sea / Marine Water",
-]
+from config.constants import LAND_COVER_CLASSES
 
 _CACHED_MODEL = None
 _CACHED_MASK = None

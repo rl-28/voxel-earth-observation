@@ -7,23 +7,7 @@ band selection mask for Module 3 pipeline training and evaluation.
 import numpy as np
 import torch
 
-SENTINEL2_BANDS = [
-    "B01 (Coastal)",
-    "B02 (Blue)",
-    "B03 (Green)",
-    "B04 (Red)",
-    "B05 (VRE 1)",
-    "B06 (VRE 2)",
-    "B07 (VRE 3)",
-    "B08 (NIR)",
-    "B8A (Narrow NIR)",
-    "B09 (Water Vapour)",
-    "B10 (Cirrus)",
-    "B11 (SWIR 1)",
-    "B12 (SWIR 2)",
-]
-
-DEFAULT_SELECTED_BAND_INDICES = [1, 2, 3, 7, 11, 12]  # B2, B3, B4, B8, B11, B12 (e.g. VIS+NIR+SWIR)
+from config.constants import SENTINEL2_BANDS, DEFAULT_SELECTED_BAND_INDICES
 
 
 def generate_band_mask(selected_indices=None, total_bands=13):
