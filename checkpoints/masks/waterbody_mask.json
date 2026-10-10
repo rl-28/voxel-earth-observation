@@ -1,0 +1,21 @@
+{
+  "selected_indices": [
+    0,
+    2,
+    3,
+    5,
+    8,
+    11
+  ],
+  "selected_bands": [
+    "B01",
+    "B03",
+    "B04",
+    "B06",
+    "B8A",
+    "B11"
+  ],
+  "total_bands": 13,
+  "method": "BWOA",
+  "dataset": "Sentinel-2 L2A"
+}
