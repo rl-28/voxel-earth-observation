@@ -28,6 +28,7 @@ def filter_albedo_contamination(
     input_scale: str = "normalized",
     valid_mask: Optional[np.ndarray] = None,
     band_names: Optional[List[str]] = None,
+    keep_water: bool = False,
 ) -> AlbedoFilterResult:
     """
     Applies physically motivated reflection and contamination suppression.
@@ -114,6 +115,12 @@ def filter_albedo_contamination(
             (tensor[:, :, b_idx["B04"]] < shadow_t) & 
             (tensor[:, :, b_idx["B08"]] < shadow_t)
         )
+        if keep_water and "B03" in b_idx:
+            # Water physical signature: Green > NIR (positive NDWI)
+            g = tensor[:, :, b_idx["B03"]]
+            nir = tensor[:, :, b_idx["B08"]]
+            is_water = (g > nir) & ((g - nir) / (g + nir + 1e-6) > 0.0)
+            shadow_mask &= (~is_water)
 
     # Mask only valid pixels
     glare_mask &= valid_mask

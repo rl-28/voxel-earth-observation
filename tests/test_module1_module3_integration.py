@@ -146,3 +146,83 @@ def test_module2_optimization_exclude_placeholder_flag(tmp_path):
     assert 10 not in exported_data["selected_indices"]
     assert "B10" not in exported_data["selected_bands"]
     assert exported_data["total_bands"] == 13
+
+
+def test_module1_spatial_only_wavelet_preserves_distinct_bands():
+    """
+    Verifies that spatial_only_wavelet=True prevents spectral smoothing along axis 2,
+    keeping adjacent bands distinct, while default spatial_only_wavelet=False averages pairs.
+    """
+    # Create synthetic tile with distinct band levels: band c has baseline (c+1)*800 DN
+    rng = np.random.default_rng(123)
+    raw_12 = np.zeros((256, 256, 12), dtype=OUTPUT_DTYPE)
+    for c in range(12):
+        raw_12[:, :, c] = (c + 1) * 800.0 + rng.uniform(10, 50, size=(256, 256)).astype(OUTPUT_DTYPE)
+
+    # 1. Pipeline with spatial_only_wavelet=True
+    pipeline_spatial = Module1Pipeline(
+        output_mode="reflectance",
+        output_13_bands=True,
+        spatial_only_wavelet=True
+    )
+    res_spatial = pipeline_spatial.process_tile({"tile_data": raw_12, "row_idx": 0, "col_idx": 0})
+    tensor_sp = res_spatial.processed_tensor  # (13, 256, 256)
+
+    # In 13-band layout, the original 12 bands map to:
+    # 0:B01, 1:B02, 2:B03, 3:B04, 4:B05, 5:B06, 6:B07, 7:B08, 8:B8A, 9:B09, 10:B10 (placeholder), 11:B11, 12:B12
+    # The pairs that were previously identical are:
+    test_pairs = [(0, 1), (2, 3), (4, 5), (6, 7), (8, 9), (11, 12)]
+    for idx1, idx2 in test_pairs:
+        diff = np.abs(tensor_sp[idx1] - tensor_sp[idx2])
+        assert diff.max() > 0.05, f"Bands {idx1} and {idx2} should be distinct in spatial_only mode, but max diff is {diff.max()}"
+        assert not np.allclose(tensor_sp[idx1], tensor_sp[idx2], atol=1e-5)
+
+    # 2. Compare against default pipeline (spatial_only_wavelet=False)
+    pipeline_default = Module1Pipeline(
+        output_mode="reflectance",
+        output_13_bands=True,
+        spatial_only_wavelet=False
+    )
+    res_default = pipeline_default.process_tile({"tile_data": raw_12, "row_idx": 0, "col_idx": 0})
+    tensor_def = res_default.processed_tensor
+    for idx1, idx2 in test_pairs:
+        assert np.allclose(tensor_def[idx1], tensor_def[idx2], atol=1e-6), (
+            f"Bands {idx1} and {idx2} should be identical in default 3D DWT mode"
+        )
+
+
+def test_module1_keep_water_preserves_water_pixels():
+    """
+    Verifies that keep_water=True preserves pixels matching the physical water signature
+    (NDWI > 0, Green > NIR) which would otherwise be zeroed by the cloud shadow heuristic.
+    """
+    # Create synthetic tile with reflectance values
+    # In 12-band input: index 1=B02, 2=B03(Green), 3=B04(Red), 7=B08(NIR)
+    raw_12 = np.full((256, 256, 12), 1500.0, dtype=OUTPUT_DTYPE)
+
+    # Set half the tile to water signature: low Red (0.02 = 200 DN), low NIR (0.01 = 100 DN),
+    # but higher Green (0.08 = 800 DN) -> NDWI > 0
+    raw_12[:128, :, 2] = 800.0   # B03 (Green)
+    raw_12[:128, :, 3] = 200.0   # B04 (Red)
+    raw_12[:128, :, 7] = 100.0   # B08 (NIR)
+
+    # Set the other half to cloud shadow: low across all bands (100 DN)
+    raw_12[128:, :, 2] = 100.0   # B03 (Green)
+    raw_12[128:, :, 3] = 100.0   # B04 (Red)
+    raw_12[128:, :, 7] = 100.0   # B08 (NIR)
+
+    # Pipeline with keep_water=False (default behavior)
+    p_default = Module1Pipeline(output_mode="reflectance", keep_water=False, spatial_only_wavelet=True)
+    res_default = p_default.process_tile({"tile_data": raw_12, "row_idx": 0, "col_idx": 0})
+    # Both halves are zeroed under default shadow rule because B04 < 0.05 and B08 < 0.05
+    assert np.all(res_default.processed_tensor[:128, :, :] == 0.0)
+
+    # Pipeline with keep_water=True
+    p_water = Module1Pipeline(output_mode="reflectance", keep_water=True, spatial_only_wavelet=True)
+    res_water = p_water.process_tile({"tile_data": raw_12, "row_idx": 0, "col_idx": 0})
+    # Water half must be preserved (non-zero)
+    assert not np.all(res_water.processed_tensor[:128, :, :] == 0.0)
+    assert (res_water.processed_tensor[:128, :, :] > 0.0).any()
+    # Non-water shadow half should still be zeroed
+    assert np.all(res_water.processed_tensor[128:, :, :] == 0.0)
+

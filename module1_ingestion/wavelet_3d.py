@@ -1,7 +1,7 @@
 import numpy as np
 import pywt
 from dataclasses import dataclass
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, Optional
 
 from .config import WAVELET_NAME, WAVELET_LEVEL, WAVELET_MODE
 
@@ -24,6 +24,7 @@ class Wavelet3DResult:
     level: int
     mode: str
     coefficients: list
+    axes: Tuple[int, ...] = (0, 1, 2)
 
     @property
     def approximation(self) -> np.ndarray:
@@ -45,7 +46,7 @@ class Wavelet3DResult:
             reconstructed_coeffs, 
             wavelet=self.wavelet, 
             mode=self.mode,
-            axes=(0, 1, 2)
+            axes=self.axes
         )
         
         # Crop in case of slightly larger inverse due to odd dimensions
@@ -61,7 +62,7 @@ class Wavelet3DResult:
             self.coefficients, 
             wavelet=self.wavelet, 
             mode=self.mode,
-            axes=(0, 1, 2)
+            axes=self.axes
         )
         
         h, w, c = self.input_shape
@@ -72,16 +73,21 @@ def apply_3d_dwt(
     tensor: np.ndarray,
     wavelet: str = WAVELET_NAME,
     level: int = WAVELET_LEVEL,
-    mode: str = WAVELET_MODE
+    mode: str = WAVELET_MODE,
+    spatial_only: bool = False,
+    axes: Optional[Tuple[int, ...]] = None
 ) -> Wavelet3DResult:
     """
-    Applies a 3D Discrete Wavelet Transform over the (Height, Width, Spectral) axes.
+    Applies a 3D Discrete Wavelet Transform over the (Height, Width, Spectral) axes,
+    or optionally over spatial-only axes (Height, Width) to preserve spectral fidelity.
     
     Args:
         tensor: A 3D NumPy array of shape (H, W, C).
         wavelet: PyWavelets wavelet name (e.g., 'db1').
         level: Decomposition level.
         mode: Boundary handling mode (default 'symmetric').
+        spatial_only: If True, decomposes only along spatial axes (0, 1), avoiding spectral smoothing.
+        axes: Explicit axes tuple. If None, defaults to (0, 1) if spatial_only else (0, 1, 2).
         
     Returns:
         Wavelet3DResult containing coefficients and reconstruction methods.
@@ -105,14 +111,17 @@ def apply_3d_dwt(
     if not np.isfinite(tensor).all():
         raise ValueError("Input contains non-finite values (NaN or Inf). Cannot perform DWT.")
 
+    if axes is None:
+        axes = (0, 1) if spatial_only else (0, 1, 2)
+
     # pywt handles precision based on input; we ensure float32 or float64.
-    # Apply 3D DWT across all three axes (0: Height, 1: Width, 2: Spectral)
+    # Apply DWT across specified axes
     coeffs = pywt.wavedecn(
         tensor,
         wavelet=wavelet,
         mode=mode,
         level=level,
-        axes=(0, 1, 2)
+        axes=axes
     )
 
     return Wavelet3DResult(
@@ -120,5 +129,6 @@ def apply_3d_dwt(
         wavelet=wavelet,
         level=level,
         mode=mode,
-        coefficients=coeffs
+        coefficients=coeffs,
+        axes=axes
     )

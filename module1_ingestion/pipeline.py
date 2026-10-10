@@ -45,7 +45,9 @@ class Module1Pipeline:
         wavelet_level: int = WAVELET_LEVEL,
         wavelet_mode: str = WAVELET_MODE,
         output_mode: str = "zscore",
-        output_13_bands: bool = False
+        output_13_bands: bool = False,
+        spatial_only_wavelet: bool = False,
+        keep_water: bool = False
     ):
         self.enable_wavelet = enable_wavelet
         self.enable_albedo_filter = enable_albedo_filter
@@ -54,6 +56,8 @@ class Module1Pipeline:
         self.wavelet_mode = wavelet_mode
         self.output_mode = output_mode
         self.output_13_bands = output_13_bands
+        self.spatial_only_wavelet = spatial_only_wavelet
+        self.keep_water = keep_water
 
     def process_scene(self, band_paths: Dict[str, str], reference_band_key: str = "B04") -> Generator[Module1Result, None, None]:
         """
@@ -112,7 +116,8 @@ class Module1Pipeline:
                 current_tensor, 
                 wavelet=self.wavelet_name, 
                 level=self.wavelet_level, 
-                mode=self.wavelet_mode
+                mode=self.wavelet_mode,
+                spatial_only=self.spatial_only_wavelet
             )
             # Use spatially preserved reconstruction representation
             current_tensor = wavelet_res.reconstruct_approximation()
@@ -123,6 +128,7 @@ class Module1Pipeline:
             if not np.isfinite(current_tensor).all():
                 raise ValueError(f"Stage 6 Failed: DWT produced non-finite values")
             diagnostics["stage_6_dwt_time"] = time.time() - wt_start
+            diagnostics["spatial_only_wavelet"] = self.spatial_only_wavelet
             
         # 7. Albedo/reflection contamination filtering
         albedo_res = None
@@ -133,7 +139,8 @@ class Module1Pipeline:
                 current_tensor,
                 input_scale=albedo_scale,
                 valid_mask=valid_mask,
-                band_names=SENTINEL_2_L2A_SPECTRAL_BANDS
+                band_names=SENTINEL_2_L2A_SPECTRAL_BANDS,
+                keep_water=self.keep_water
             )
             current_tensor = albedo_res.filtered
             valid_mask = albedo_res.valid_mask
@@ -198,6 +205,8 @@ class Module1Pipeline:
         diagnostics["total_time"] = time.time() - start_time
         diagnostics["output_mode"] = self.output_mode
         diagnostics["output_13_bands"] = self.output_13_bands
+        diagnostics["spatial_only_wavelet"] = self.spatial_only_wavelet
+        diagnostics["keep_water"] = self.keep_water
         
         metadata = {
             "transform": tile_dict.get("transform"),
@@ -208,7 +217,9 @@ class Module1Pipeline:
             "wavelet_enabled": self.enable_wavelet,
             "albedo_filter_enabled": self.enable_albedo_filter,
             "output_mode": self.output_mode,
-            "output_13_bands": self.output_13_bands
+            "output_13_bands": self.output_13_bands,
+            "spatial_only_wavelet": self.spatial_only_wavelet,
+            "keep_water": self.keep_water
         }
         
         return Module1Result(
