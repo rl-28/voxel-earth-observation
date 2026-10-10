@@ -13,8 +13,10 @@ Execution Flow:
 7. Final Metrics & Computation Savings Estimation
 """
 
+import json
 import logging
-from typing import Dict, List, Tuple, Optional, Any
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional, Any, Union
 import numpy as np
 
 from .config import (
@@ -110,7 +112,9 @@ def run_module2_optimization(
     enforce_domain_balance: bool = True,
     pop_size: int = DEFAULT_WOA_POP_SIZE,
     max_iter: int = DEFAULT_WOA_MAX_ITER,
-    seed: int = 0
+    seed: int = 0,
+    export_mask_path: Optional[Union[str, Path]] = None,
+    exclude_placeholder_b10: bool = False
 ) -> Tuple[np.ndarray, List[int], Dict[str, Any]]:
     """
     End-to-end execution pipeline for Module 2 Metaheuristic Band Selection.
@@ -133,6 +137,8 @@ def run_module2_optimization(
         pop_size: Population size for Whale Optimization (default: 20).
         max_iter: Maximum search iterations (default: 50).
         seed: Random seed for deterministic reproducibility.
+        export_mask_path: Optional destination file path to export mask as standard JSON.
+        exclude_placeholder_b10: If True, refuses to select index 10 when exporting or finalizing mask.
 
     Returns:
         Tuple[np.ndarray, List[int], Dict[str, Any]]:
@@ -202,6 +208,13 @@ def run_module2_optimization(
     # 8. Extract Final Metrics
     final_fitness, detailed_metrics = evaluator.evaluate(best_mask)
     selected_indices = sorted(list(np.where(best_mask == 1)[0]))
+
+    # Refuse index 10 if marked as placeholder
+    if exclude_placeholder_b10 and 10 in selected_indices:
+        logger.info("Refusing to select index 10 (placeholder band); removing from optimal mask.")
+        best_mask[10] = 0
+        selected_indices = sorted(list(np.where(best_mask == 1)[0]))
+
     k_selected = len(selected_indices)
     selected_bands = [INDEX_TO_BAND[idx] for idx in selected_indices]
 
@@ -229,9 +242,97 @@ def run_module2_optimization(
         "band_penalty": detailed_metrics["total_band_penalty"]
     }
 
+    if export_mask_path is not None:
+        save_band_mask(
+            path=export_mask_path,
+            selected_indices=selected_indices,
+            method="BWOA",
+            dataset="Sentinel-2 L2A",
+            exclude_placeholder_index=10 if exclude_placeholder_b10 else None
+        )
+
     logger.info(
         f"Module 2 Optimization complete: selected {k_selected} bands {selected_bands} "
         f"with {data_reduction_pct:.1f}% data reduction and fitness {final_fitness:.4f}."
     )
 
     return best_mask, selected_indices, optimization_metrics
+
+
+def save_band_mask(
+    path: Union[str, Path, np.ndarray, List[int]],
+    selected_indices: Optional[Union[List[int], np.ndarray, str, Path]] = None,
+    mask: Optional[np.ndarray] = None,
+    method: str = "BWOA",
+    dataset: str = "Sentinel-2 L2A",
+    exclude_placeholder_index: Optional[int] = 10,
+) -> Dict[str, Any]:
+    """
+    Exports the band selection mask to disk in the standard JSON contract format
+    (matching config/example_band_mask.json).
+
+    Refuses to select index 10 when that band is a placeholder (enforces it when exporting).
+
+    Args:
+        path: Destination JSON file path (or mask/indices if swapped).
+        selected_indices: Optional list of 0-based integer band indices.
+        mask: Optional 1D binary mask of shape (13,). Used if selected_indices is None.
+        method: Method name (default: "BWOA").
+        dataset: Dataset name (default: "Sentinel-2 L2A").
+        exclude_placeholder_index: Band index to refuse/exclude (default: 10 for B10 placeholder).
+
+    Returns:
+        Dict[str, Any]: Dictionary representation of the exported mask JSON.
+    """
+    # Handle swapped arguments e.g. save_band_mask(mask, path)
+    if not isinstance(path, (str, Path)) and isinstance(selected_indices, (str, Path)):
+        temp = path
+        path = selected_indices
+        if isinstance(temp, (list, tuple)):
+            if len(temp) == TOTAL_BANDS and set(temp).issubset({0, 1}):
+                mask = np.array(temp)
+                selected_indices = None
+            else:
+                selected_indices = list(temp)
+        elif isinstance(temp, np.ndarray):
+            mask = temp
+            selected_indices = None
+
+    if selected_indices is None:
+        if mask is None:
+            indices = [1, 2, 3, 7, 11, 12]
+        else:
+            mask_arr = np.asarray(mask).ravel()
+            indices = [int(i) for i in np.where(mask_arr == 1)[0]]
+    else:
+        if isinstance(selected_indices, (np.ndarray, list)) and len(selected_indices) == TOTAL_BANDS and set(np.unique(selected_indices)).issubset({0, 1}):
+            indices = [int(i) for i in np.where(np.asarray(selected_indices) == 1)[0]]
+        else:
+            indices = [int(i) for i in selected_indices]
+
+    # Refuse to select placeholder band when exporting
+    if exclude_placeholder_index is not None and exclude_placeholder_index in indices:
+        logger.warning(
+            f"Placeholder band index {exclude_placeholder_index} ({INDEX_TO_BAND.get(exclude_placeholder_index, 'B10')}) "
+            f"detected in selection; refusing to export placeholder band to active mask."
+        )
+        indices = [idx for idx in indices if idx != exclude_placeholder_index]
+
+    indices = sorted(indices)
+    bands = [INDEX_TO_BAND[idx] for idx in indices if idx in INDEX_TO_BAND]
+
+    mask_dict = {
+        "selected_indices": indices,
+        "selected_bands": bands,
+        "total_bands": TOTAL_BANDS,
+        "method": method,
+        "dataset": dataset,
+    }
+
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(mask_dict, f, indent=2)
+
+    logger.info(f"Exported band mask to {out_path} ({len(indices)} bands: {bands})")
+    return mask_dict

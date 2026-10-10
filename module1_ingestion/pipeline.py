@@ -43,13 +43,17 @@ class Module1Pipeline:
         enable_albedo_filter: bool = True,
         wavelet_name: str = WAVELET_NAME,
         wavelet_level: int = WAVELET_LEVEL,
-        wavelet_mode: str = WAVELET_MODE
+        wavelet_mode: str = WAVELET_MODE,
+        output_mode: str = "zscore",
+        output_13_bands: bool = False
     ):
         self.enable_wavelet = enable_wavelet
         self.enable_albedo_filter = enable_albedo_filter
         self.wavelet_name = wavelet_name
         self.wavelet_level = wavelet_level
         self.wavelet_mode = wavelet_mode
+        self.output_mode = output_mode
+        self.output_13_bands = output_13_bands
 
     def process_scene(self, band_paths: Dict[str, str], reference_band_key: str = "B04") -> Generator[Module1Result, None, None]:
         """
@@ -79,12 +83,20 @@ class Module1Pipeline:
         # 4. Valid-mask extraction
         base_valid_mask = np.isfinite(raw_tensor).all(axis=2)
         
-        # 5. Z-score normalization
+        # 5. Radiometric scaling / Normalization
         norm_start = time.time()
-        normalized_tensor, final_valid_mask_3d, means, stds = normalize_zscore(
-            raw_tensor, valid_mask=base_valid_mask
-        )
-        valid_mask = final_valid_mask_3d.all(axis=2)
+        if self.output_mode == "reflectance":
+            # Surface reflectance = DN / 10000.0, clipped to [0.0, 1.0], no Z-score
+            normalized_tensor = np.clip(raw_tensor / 10000.0, 0.0, 1.0).astype(OUTPUT_DTYPE)
+            valid_mask = base_valid_mask
+            diagnostics["normalization_type"] = "reflectance"
+        else:
+            # Default: Z-score normalization
+            normalized_tensor, final_valid_mask_3d, means, stds = normalize_zscore(
+                raw_tensor, valid_mask=base_valid_mask
+            )
+            valid_mask = final_valid_mask_3d.all(axis=2)
+            diagnostics["normalization_type"] = "zscore"
         
         if not np.isfinite(normalized_tensor).all():
             raise ValueError(f"Stage 5 Failed: Normalization produced non-finite values for {tile_id}")
@@ -104,6 +116,8 @@ class Module1Pipeline:
             )
             # Use spatially preserved reconstruction representation
             current_tensor = wavelet_res.reconstruct_approximation()
+            if self.output_mode == "reflectance":
+                current_tensor = np.clip(current_tensor, 0.0, 1.0).astype(OUTPUT_DTYPE)
             if current_tensor.shape != (256, 256, C):
                 raise ValueError(f"Stage 6 Failed: DWT spatial reconstruction altered shape to {current_tensor.shape}")
             if not np.isfinite(current_tensor).all():
@@ -114,14 +128,17 @@ class Module1Pipeline:
         albedo_res = None
         if self.enable_albedo_filter:
             alb_start = time.time()
+            albedo_scale = "reflectance" if self.output_mode == "reflectance" else "normalized"
             albedo_res = filter_albedo_contamination(
                 current_tensor,
-                input_scale="normalized",
+                input_scale=albedo_scale,
                 valid_mask=valid_mask,
                 band_names=SENTINEL_2_L2A_SPECTRAL_BANDS
             )
             current_tensor = albedo_res.filtered
             valid_mask = albedo_res.valid_mask
+            if self.output_mode == "reflectance":
+                current_tensor = np.clip(current_tensor, 0.0, 1.0).astype(OUTPUT_DTYPE)
             if current_tensor.shape != (256, 256, C):
                 raise ValueError(f"Stage 7 Failed: Albedo filter altered shape to {current_tensor.shape}")
             if not np.isfinite(current_tensor).all():
@@ -132,29 +149,55 @@ class Module1Pipeline:
                 diagnostics[f"albedo_{k}"] = v
             diagnostics["stage_7_albedo_time"] = time.time() - alb_start
 
+        # 7.5 Optional 13-band channel-first formatting
+        if self.output_13_bands:
+            if C == 12:
+                # Insert zero-filled B10 channel at index 10 (between B09 and B11)
+                b10_zeros = np.zeros((H, W, 1), dtype=OUTPUT_DTYPE)
+                tensor_13_last = np.concatenate([current_tensor[:, :, :10], b10_zeros, current_tensor[:, :, 10:]], axis=2)
+            elif C == 13:
+                tensor_13_last = current_tensor
+            else:
+                raise ValueError(f"Stage 7.5 Failed: cannot construct 13-band output from {C} channels")
+            
+            # Format as channel-first (13, 256, 256)
+            final_tensor = np.transpose(tensor_13_last, (2, 0, 1)).astype(OUTPUT_DTYPE)
+            diagnostics["channel_layout"] = "channels_first (13, 256, 256)"
+            diagnostics["b10_placeholder"] = (C == 12)
+        else:
+            final_tensor = current_tensor
+            diagnostics["channel_layout"] = f"channels_last (256, 256, {C})"
+
         # 8. Final validation
         val_start = time.time()
         
-        if current_tensor.dtype != OUTPUT_DTYPE:
-            raise TypeError(f"Stage 8 Failed: expected dtype {OUTPUT_DTYPE}, got {current_tensor.dtype}")
+        if final_tensor.dtype != OUTPUT_DTYPE:
+            raise TypeError(f"Stage 8 Failed: expected dtype {OUTPUT_DTYPE}, got {final_tensor.dtype}")
             
-        if not np.isfinite(current_tensor).all():
+        if not np.isfinite(final_tensor).all():
             raise ValueError(f"Stage 8 Failed: tensor contains non-finite values")
             
-        if C == 13:
-            # 13-channel project contract
-            validate_spatial_spectral_tensor(current_tensor)
-            diagnostics["contract_type"] = "13-band final"
-        elif C == 12:
-            # 12-band real L2A intermediate
-            if current_tensor.shape != (256, 256, 12):
-                raise ValueError(f"Stage 8 Failed: expected shape (256, 256, 12), got {current_tensor.shape}")
-            diagnostics["contract_type"] = "12-band intermediate"
+        if self.output_13_bands:
+            if final_tensor.shape != (13, 256, 256):
+                raise ValueError(f"Stage 8 Failed: expected shape (13, 256, 256), got {final_tensor.shape}")
+            diagnostics["contract_type"] = "13-band channel-first (Module 3 contract)"
         else:
-            raise ValueError(f"Stage 8 Failed: Unsupported number of bands {C}")
+            if C == 13:
+                # 13-channel project contract
+                validate_spatial_spectral_tensor(final_tensor)
+                diagnostics["contract_type"] = "13-band final"
+            elif C == 12:
+                # 12-band real L2A intermediate
+                if final_tensor.shape != (256, 256, 12):
+                    raise ValueError(f"Stage 8 Failed: expected shape (256, 256, 12), got {final_tensor.shape}")
+                diagnostics["contract_type"] = "12-band intermediate"
+            else:
+                raise ValueError(f"Stage 8 Failed: Unsupported number of bands {C}")
             
         diagnostics["stage_8_validation_time"] = time.time() - val_start
         diagnostics["total_time"] = time.time() - start_time
+        diagnostics["output_mode"] = self.output_mode
+        diagnostics["output_13_bands"] = self.output_13_bands
         
         metadata = {
             "transform": tile_dict.get("transform"),
@@ -163,14 +206,16 @@ class Module1Pipeline:
             "row_idx": row_idx,
             "col_idx": col_idx,
             "wavelet_enabled": self.enable_wavelet,
-            "albedo_filter_enabled": self.enable_albedo_filter
+            "albedo_filter_enabled": self.enable_albedo_filter,
+            "output_mode": self.output_mode,
+            "output_13_bands": self.output_13_bands
         }
         
         return Module1Result(
             tile_id=tile_id,
             input_shape=raw_tensor.shape,
-            output_shape=current_tensor.shape,
-            processed_tensor=current_tensor,
+            output_shape=final_tensor.shape,
+            processed_tensor=final_tensor,
             valid_mask=valid_mask,
             wavelet_result=wavelet_res,
             glare_mask=albedo_res.glare_mask if albedo_res else None,

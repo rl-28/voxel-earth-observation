@@ -42,7 +42,8 @@ from .bio_search import (
 )
 from .orchestrator import (
     apply_domain_balance_guard,
-    run_module2_optimization
+    run_module2_optimization,
+    save_band_mask
 )
 from .integration import (
     apply_module2_band_selection
@@ -79,5 +80,6 @@ __all__ = [
     "binary_whale_optimization_search",
     "apply_domain_balance_guard",
     "run_module2_optimization",
+    "save_band_mask",
     "apply_module2_band_selection"
 ]

@@ -8,6 +8,7 @@ from utils.band_mask import (
     default_band_mask,
     describe_band_mask,
     load_band_mask,
+    save_band_mask,
     validate_band_mask,
 )
 from utils.llm_parser import (
@@ -26,6 +27,7 @@ __all__ = [
     "validate_band_mask",
     "describe_band_mask",
     "load_band_mask",
+    "save_band_mask",
     # Stage 0 Natural Language Parser & API Management
     "VoxelExecutionContract",
     "VoxelStageZeroParser",

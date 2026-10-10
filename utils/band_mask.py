@@ -188,3 +188,26 @@ def load_band_mask(path: Optional[str] = None) -> torch.Tensor:
         raise ValueError(f"Unsupported mask file extension '{ext}'. Choose from .json, .npy, .pt, or .pth")
 
     return validate_band_mask(mask_tensor)
+
+
+def save_band_mask(
+    path: Union[str, os.PathLike, np.ndarray, List[int]],
+    selected_indices: Optional[Union[List[int], np.ndarray, str, os.PathLike]] = None,
+    mask: Optional[Union[np.ndarray, torch.Tensor, List[int]]] = None,
+    method: str = "BWOA",
+    dataset: str = "Sentinel-2 L2A",
+    exclude_placeholder_index: Optional[int] = 10,
+):
+    """
+    Exports the band selection mask to disk in the standard JSON contract format.
+    Refuses to select index 10 when that band is a placeholder.
+    """
+    from module2_optimization.orchestrator import save_band_mask as _save_band_mask
+    return _save_band_mask(
+        path=path,
+        selected_indices=selected_indices,
+        mask=mask,
+        method=method,
+        dataset=dataset,
+        exclude_placeholder_index=exclude_placeholder_index,
+    )
