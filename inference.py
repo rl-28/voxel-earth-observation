@@ -20,27 +20,35 @@ if sys.platform == "win32":
 
 from models.fusion_net import FusionNet
 from explainability.faiss_search import query_similar_terrain
-from config.constants import LAND_COVER_CLASSES
+from config.constants import LAND_COVER_CLASSES, get_task_classes, TASKS
 
 _CACHED_MODEL = None
 _CACHED_MASK = None
 _CACHED_DEVICE = None
 _CACHED_CLASSES = None
+_CACHED_PATH = None
 
 
 def load_model(
     checkpoint_path: str = "checkpoints/best_fusion_net.pth",
     device: Optional[str] = None,
+    task: Optional[str] = None,
 ) -> Tuple[FusionNet, torch.Tensor, torch.device]:
     """Loads and caches the trained FusionNet model and registered band mask from checkpoint."""
-    global _CACHED_MODEL, _CACHED_MASK, _CACHED_DEVICE, _CACHED_CLASSES
+    global _CACHED_MODEL, _CACHED_MASK, _CACHED_DEVICE, _CACHED_CLASSES, _CACHED_PATH
 
     if device is None:
         device_obj = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     else:
         device_obj = torch.device(device)
 
-    if _CACHED_MODEL is not None and _CACHED_DEVICE == device_obj:
+    norm_path = os.path.abspath(checkpoint_path) if os.path.exists(checkpoint_path) else checkpoint_path
+    if (
+        _CACHED_MODEL is not None
+        and _CACHED_DEVICE == device_obj
+        and _CACHED_PATH == norm_path
+        and (task is None or _CACHED_CLASSES == get_task_classes(task))
+    ):
         return _CACHED_MODEL, _CACHED_MASK, _CACHED_DEVICE
 
     if not os.path.exists(checkpoint_path):
@@ -54,7 +62,12 @@ def load_model(
     else:
         active_channels = checkpoint.get("selected_channels", 6)
 
-    class_list = checkpoint.get("class_list", LAND_COVER_CLASSES)
+    if task is not None:
+        class_list = get_task_classes(task)
+    elif "task" in checkpoint and checkpoint["task"] in TASKS:
+        class_list = TASKS[checkpoint["task"]]["classes"]
+    else:
+        class_list = checkpoint.get("class_list", LAND_COVER_CLASSES)
     _CACHED_CLASSES = class_list
 
     model = FusionNet(
@@ -71,6 +84,7 @@ def load_model(
     _CACHED_MODEL = model
     _CACHED_MASK = mask
     _CACHED_DEVICE = device_obj
+    _CACHED_PATH = norm_path
 
     return model, mask, device_obj
 
@@ -81,6 +95,7 @@ def predict_and_search(
     top_k: int = 5,
     checkpoint_path: str = "checkpoints/best_fusion_net.pth",
     index_path: str = "checkpoints/terrain_index.faiss",
+    task: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Classify a satellite tile and query FAISS for similar terrain scenes.
@@ -91,6 +106,7 @@ def predict_and_search(
         top_k: Number of nearest similar terrain scenes to retrieve.
         checkpoint_path: Path to best_fusion_net.pth.
         index_path: Path to terrain_index.faiss.
+        task: Optional task name (e.g. forest_cover, waterbody).
         
     Returns:
         dict: {
@@ -103,7 +119,7 @@ def predict_and_search(
             "retrieval_latency_ms": float,
         }
     """
-    model, default_mask, device = load_model(checkpoint_path)
+    model, default_mask, device = load_model(checkpoint_path, task=task)
 
     # Prepare input tensor
     if isinstance(tile_tensor, np.ndarray):

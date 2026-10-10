@@ -42,6 +42,7 @@ def build_all_explainability_artifacts(
     batch_size: int = 8,
     device_name: str = "auto",
     mock: bool = False,
+    task: Optional[str] = None,
 ):
     os.makedirs(output_dir, exist_ok=True)
 
@@ -68,6 +69,7 @@ def build_all_explainability_artifacts(
     print(f"Active Channels:    {active_bands} spectral bands")
 
     # 2. Setup Validation Dataset & DataLoader
+    num_classes = getattr(model, "num_classes", 10)
     if not mock and manifest_path and os.path.exists(manifest_path):
         print(f"Loading real satellite validation tiles via manifest: {manifest_path}")
         splits_save_path = os.path.join(output_dir, "splits.json")
@@ -76,10 +78,12 @@ def build_all_explainability_artifacts(
             data_dir=data_dir,
             label_map_path=label_map_path,
             splits_save_path=splits_save_path,
+            task=task,
+            num_classes=num_classes,
         )
     else:
-        print("Using synthetic Mock Sentinel-2 validation dataset (--mock)...")
-        val_ds = MockSentinel2Dataset(num_samples=32, num_classes=10, augment=False, seed=123)
+        print(f"Using synthetic Mock Sentinel-2 validation dataset (--mock, num_classes={num_classes})...")
+        val_ds = MockSentinel2Dataset(num_samples=32, num_classes=num_classes, augment=False, seed=123)
 
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=0)
     print(f"Validation Tiles:   {len(val_ds)} scenes available for explanation & indexing")
@@ -130,6 +134,7 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
     parser.add_argument("--device", type=str, default="auto", help="Compute device ('auto', 'cuda', 'cpu')")
     parser.add_argument("--mock", action="store_true", help="Force synthetic mock validation tiles")
+    parser.add_argument("--task", type=str, default=None, help="Specialized task profile ('forest_cover', 'waterbody')")
     return parser.parse_args()
 
 
@@ -145,4 +150,5 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         device_name=args.device,
         mock=args.mock,
+        task=args.task,
     )

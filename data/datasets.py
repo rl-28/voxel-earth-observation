@@ -29,6 +29,9 @@ from config.constants import (
     NUM_BANDS,
     NUM_CLASSES,
     TILE_SIZE,
+    TASKS,
+    get_task_classes,
+    get_task_num_classes,
 )
 
 
@@ -108,6 +111,9 @@ class RealSentinel2Dataset(BaseSentinel2Dataset):
         split: Optional[str] = None,
         augment: bool = False,
         target_size: int = TILE_SIZE,
+        task: Optional[str] = None,
+        num_classes: Optional[int] = None,
+        class_list: Optional[List[str]] = None,
     ):
         """
         Args:
@@ -118,14 +124,31 @@ class RealSentinel2Dataset(BaseSentinel2Dataset):
             split: Filter to a specific split ('train', 'val', 'test').
             augment: Whether to apply spatial augmentations (only applied if split == 'train').
             target_size: Expected spatial height and width (default: 256).
+            task: Task identifier ('forest_cover', 'waterbody', etc.).
+            num_classes: Explicit number of target classes.
+            class_list: Explicit list of class names.
         """
         super().__init__()
         self.data_dir = data_dir
         self.scale_divisor = scale_divisor
         self.label_map = label_map
         self.target_size = target_size
+        self.task = task
         self._logged_scaling = False
         self._logged_resizing = False
+
+        if task is not None and task in TASKS:
+            self.class_list = list(TASKS[task]["classes"])
+            self.num_classes = len(self.class_list)
+        elif class_list is not None:
+            self.class_list = list(class_list)
+            self.num_classes = num_classes if num_classes is not None else len(self.class_list)
+        elif num_classes is not None:
+            self.num_classes = num_classes
+            self.class_list = LAND_COVER_CLASSES if num_classes == len(LAND_COVER_CLASSES) else [f"Class_{i}" for i in range(num_classes)]
+        else:
+            self.class_list = list(LAND_COVER_CLASSES)
+            self.num_classes = NUM_CLASSES
 
         df = manifest_df.copy()
 
@@ -146,7 +169,13 @@ class RealSentinel2Dataset(BaseSentinel2Dataset):
 
     def _load_tile_from_disk(self, file_path: str) -> np.ndarray:
         """Loads a tile from disk and auto-detects channel layout."""
-        if not os.path.isabs(file_path) and self.data_dir:
+        if os.path.isabs(file_path):
+            full_path = file_path
+        elif self.data_dir and os.path.exists(os.path.join(self.data_dir, file_path)):
+            full_path = os.path.join(self.data_dir, file_path)
+        elif os.path.exists(file_path):
+            full_path = file_path
+        elif self.data_dir:
             full_path = os.path.join(self.data_dir, file_path)
         else:
             full_path = file_path
@@ -253,16 +282,19 @@ class RealSentinel2Dataset(BaseSentinel2Dataset):
             try:
                 target_class = int(raw_label)
             except ValueError:
-                if str(raw_label).strip() in LAND_COVER_CLASSES:
-                    target_class = LAND_COVER_CLASSES.index(str(raw_label).strip())
+                str_lbl = str(raw_label).strip()
+                if str_lbl in self.class_list:
+                    target_class = self.class_list.index(str_lbl)
+                elif str_lbl in LAND_COVER_CLASSES:
+                    target_class = LAND_COVER_CLASSES.index(str_lbl)
                 else:
                     raise ValueError(
-                        f"Label '{raw_label}' cannot be parsed as int. Provide --label_map JSON mapping."
+                        f"Label '{raw_label}' cannot be parsed as int or found in class list {self.class_list}. Provide --label_map JSON mapping."
                     )
 
-        if not (0 <= target_class < NUM_CLASSES):
+        if not (0 <= target_class < self.num_classes):
             raise ValueError(
-                f"Target class {target_class} out of bounds [0, {NUM_CLASSES - 1}]. Check label or --label_map."
+                f"Target class {target_class} out of bounds [0, {self.num_classes - 1}]. Check label or --label_map."
             )
 
         # Lazy load from disk
@@ -362,6 +394,9 @@ def create_split_datasets(
     splits_save_path: Optional[str] = "checkpoints/splits.json",
     scale_divisor: float = DEFAULT_SCALE_DIVISOR,
     target_size: int = TILE_SIZE,
+    task: Optional[str] = None,
+    num_classes: Optional[int] = None,
+    class_list: Optional[List[str]] = None,
 ) -> Tuple[RealSentinel2Dataset, RealSentinel2Dataset, RealSentinel2Dataset]:
     """
     Creates train, val, and test RealSentinel2Dataset instances from a manifest CSV file.
@@ -392,6 +427,9 @@ def create_split_datasets(
         split="train",
         augment=True,
         target_size=target_size,
+        task=task,
+        num_classes=num_classes,
+        class_list=class_list,
     )
     val_ds = RealSentinel2Dataset(
         manifest_df=val_df,
@@ -401,6 +439,9 @@ def create_split_datasets(
         split="val",
         augment=False,
         target_size=target_size,
+        task=task,
+        num_classes=num_classes,
+        class_list=class_list,
     )
     test_ds = RealSentinel2Dataset(
         manifest_df=test_df,
@@ -410,5 +451,8 @@ def create_split_datasets(
         split="test",
         augment=False,
         target_size=target_size,
+        task=task,
+        num_classes=num_classes,
+        class_list=class_list,
     )
     return train_ds, val_ds, test_ds

@@ -33,7 +33,14 @@ if sys.platform == "win32":
         pass
 
 from models.fusion_net import FusionNet
-from config.constants import LAND_COVER_CLASSES, NUM_BANDS, NUM_CLASSES
+from config.constants import (
+    LAND_COVER_CLASSES,
+    NUM_BANDS,
+    NUM_CLASSES,
+    TASKS,
+    get_task_classes,
+    get_task_num_classes,
+)
 from data.datasets import create_split_datasets, RealSentinel2Dataset
 from train_gpu import MockSentinel2Dataset
 
@@ -114,6 +121,7 @@ def evaluate_model(
     device_name: str = "auto",
     mock: bool = False,
     output_dir: str = "results",
+    task: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Runs test evaluation and outputs complete metrics summary."""
     os.makedirs(output_dir, exist_ok=True)
@@ -130,7 +138,12 @@ def evaluate_model(
     print(f"Checkpoint File:           {checkpoint_path}")
 
     model, mask, class_list, ckpt_meta = load_evaluation_checkpoint(checkpoint_path, device)
+    effective_task = task or ckpt_meta.get("task")
+    if task is not None:
+        class_list = get_task_classes(task)
     num_classes = len(class_list)
+    print(f"Task:                      {effective_task or 'land_cover (default 10-class)'}")
+    print(f"Target Classes ({num_classes}):       {class_list}")
 
     # Initialize Test Dataset
     if not mock and manifest_path and os.path.exists(manifest_path):
@@ -140,6 +153,9 @@ def evaluate_model(
             data_dir=data_dir,
             label_map_path=label_map_path,
             splits_save_path=os.path.join(output_dir, "eval_splits.json"),
+            task=effective_task,
+            num_classes=num_classes,
+            class_list=class_list,
         )
     else:
         print("Using synthetic Mock Sentinel-2 test dataset (--mock)...")
@@ -219,6 +235,7 @@ def evaluate_model(
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate VOXEL Module 3 on Test Split")
+    parser.add_argument("--task", type=str, default=None, choices=list(TASKS.keys()), help="Specialized task profile ('forest_cover', 'waterbody')")
     parser.add_argument("--checkpoint", type=str, default="checkpoints/best_fusion_net.pth", help="Model checkpoint path")
     parser.add_argument("--manifest", type=str, default=None, help="Path to manifest CSV")
     parser.add_argument("--data_dir", type=str, default=None, help="Root directory for satellite tiles")
@@ -241,4 +258,5 @@ if __name__ == "__main__":
         device_name=args.device,
         mock=args.mock,
         output_dir=args.output_dir,
+        task=args.task,
     )

@@ -44,6 +44,9 @@ from config.constants import (
     NUM_BANDS,
     LAND_COVER_CLASSES,
     TILE_SIZE,
+    TASKS,
+    get_task_classes,
+    get_task_num_classes,
 )
 from data.datasets import (
     RealSentinel2Dataset,
@@ -292,6 +295,10 @@ def setup_datasets(args) -> Tuple[Dataset, Dataset, Optional[Dataset], Optional[
     Initializes train, val, and test datasets based on CLI arguments.
     Returns (train_dataset, val_dataset, test_dataset, class_weights_tensor).
     """
+    task_name = getattr(args, "task", None)
+    class_list = get_task_classes(task_name)
+    num_classes = len(class_list)
+
     if not args.mock and args.manifest:
         print(f"Loading real satellite dataset via manifest: {args.manifest}")
         splits_save_path = os.path.join(args.checkpoint_dir, "splits.json")
@@ -301,28 +308,31 @@ def setup_datasets(args) -> Tuple[Dataset, Dataset, Optional[Dataset], Optional[
             label_map_path=args.label_map,
             seed=args.seed,
             splits_save_path=splits_save_path,
+            task=task_name,
+            num_classes=num_classes,
+            class_list=class_list,
         )
         print(f"  Dataset Splits: Train={len(train_ds)}, Val={len(val_ds)}, Test={len(test_ds)}")
         print(f"  Split indices saved to: {splits_save_path}")
 
         # Compute class weights for training split
         train_labels = train_ds.records["label"].values
-        class_weights = compute_class_weights(train_labels, num_classes=NUM_CLASSES)
+        class_weights = compute_class_weights(train_labels, num_classes=num_classes)
         return train_ds, val_ds, test_ds, class_weights
 
     # Fallback to mock dataset
-    print("Initializing synthetic Mock Sentinel-2 Dataset (--mock mode)...")
+    print(f"Initializing synthetic Mock Sentinel-2 Dataset (--mock mode, task={task_name or 'land_cover'}, num_classes={num_classes})...")
     train_ds = MockSentinel2Dataset(
-        num_samples=64, num_classes=NUM_CLASSES, augment=True, seed=args.seed
+        num_samples=64, num_classes=num_classes, augment=True, seed=args.seed
     )
     val_ds = MockSentinel2Dataset(
-        num_samples=32, num_classes=NUM_CLASSES, augment=False, seed=args.seed + 1
+        num_samples=32, num_classes=num_classes, augment=False, seed=args.seed + 1
     )
     test_ds = MockSentinel2Dataset(
-        num_samples=32, num_classes=NUM_CLASSES, augment=False, seed=args.seed + 2
+        num_samples=32, num_classes=num_classes, augment=False, seed=args.seed + 2
     )
     train_labels = train_ds.targets.numpy()
-    class_weights = compute_class_weights(train_labels, num_classes=NUM_CLASSES)
+    class_weights = compute_class_weights(train_labels, num_classes=num_classes)
     return train_ds, val_ds, test_ds, class_weights
 
 
@@ -332,8 +342,14 @@ def train_pipeline(args) -> Tuple[nn.Module, Dict[str, Any]]:
     os.makedirs(args.checkpoint_dir, exist_ok=True)
     os.makedirs("results", exist_ok=True)
 
+    task_name = getattr(args, "task", None)
+    class_list = get_task_classes(task_name)
+    num_classes = len(class_list)
+
     print("=" * 80)
     print(" [VOXEL MODULE 3] HARDENED GPU TRAINING PIPELINE")
+    print(f" Task:                      {task_name or 'land_cover (default 10-class)'}")
+    print(f" Classes ({num_classes}):             {class_list}")
     print("=" * 80)
 
     # 1. Device configuration
@@ -382,7 +398,7 @@ def train_pipeline(args) -> Tuple[nn.Module, Dict[str, Any]]:
 
     # 4. Instantiate Model
     model = FusionNet(
-        num_classes=NUM_CLASSES,
+        num_classes=num_classes,
         total_bands=NUM_BANDS,
         selected_channels=active_bands,
         cnn_feature_dim=1024,
@@ -531,7 +547,9 @@ def train_pipeline(args) -> Tuple[nn.Module, Dict[str, Any]]:
                     "band_mask": band_mask.cpu(),
                     "selected_band_names": selected_band_names,
                     "selected_channels": active_bands,
-                    "class_list": LAND_COVER_CLASSES,
+                    "task": task_name,
+                    "num_classes": num_classes,
+                    "class_list": class_list,
                     "metrics": best_metrics,
                     "config_args": vars(args),
                     "git_commit": get_git_commit_hash(),
@@ -564,6 +582,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         description="VOXEL Module 3: Hardened GPU Training Pipeline",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    parser.add_argument("--task", type=str, default=None, choices=list(TASKS.keys()), help="Specialized task profile ('forest_cover', 'waterbody')")
     parser.add_argument("--mock", action="store_true", help="Force synthetic mock data generator mode")
     parser.add_argument("--data_dir", type=str, default=None, help="Root directory for real satellite tiles")
     parser.add_argument("--manifest", type=str, default=None, help="Path to manifest CSV file for real tiles")

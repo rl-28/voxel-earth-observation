@@ -41,6 +41,9 @@ from config.constants import (
     SENTINEL2_BAND_KEYS,
     SENTINEL2_BANDS,
     DEFAULT_SCALE_DIVISOR,
+    TASKS,
+    get_task_classes,
+    get_task_num_classes,
 )
 from utils.band_mask import load_band_mask, describe_band_mask, validate_band_mask
 from models.fusion_net import FusionNet
@@ -91,9 +94,17 @@ def check_manifest_and_files(
     base_dir = data_dir if data_dir else os.path.dirname(os.path.abspath(manifest_path))
     missing_files = []
     for idx, path_str in enumerate(df["tile_path"]):
-        full = path_str if os.path.isabs(str(path_str)) else os.path.join(base_dir, str(path_str))
+        p = str(path_str)
+        if os.path.isabs(p):
+            full = p
+        elif os.path.exists(p):
+            full = p
+        elif os.path.exists(os.path.join(base_dir, p)):
+            full = os.path.join(base_dir, p)
+        else:
+            full = os.path.join(base_dir, p)
         if not os.path.exists(full):
-            missing_files.append((idx, str(path_str)))
+            missing_files.append((idx, p))
 
     if missing_files:
         sample_missing = [p[1] for p in missing_files[:5]]
@@ -118,6 +129,8 @@ def check_sampled_tiles(
     sample_size: int = 20,
     scale_divisor: float = DEFAULT_SCALE_DIVISOR,
     label_map: Optional[Dict] = None,
+    task: Optional[str] = None,
+    num_classes: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Loads N sampled tiles and verifies dimensions, data type, range [0, 1], and lack of NaN/Inf."""
     n = min(sample_size, len(df))
@@ -133,6 +146,8 @@ def check_sampled_tiles(
         scale_divisor=scale_divisor,
         label_map=label_map,
         augment=False,
+        task=task,
+        num_classes=num_classes,
     )
 
     failures = []
@@ -142,7 +157,14 @@ def check_sampled_tiles(
     for idx in range(len(dataset)):
         row = sample_df.iloc[idx]
         file_path = str(row["tile_path"])
-        full_path = file_path if os.path.isabs(file_path) else os.path.join(data_dir, file_path)
+        if os.path.isabs(file_path):
+            full_path = file_path
+        elif os.path.exists(file_path):
+            full_path = file_path
+        elif data_dir and os.path.exists(os.path.join(data_dir, file_path)):
+            full_path = os.path.join(data_dir, file_path)
+        else:
+            full_path = os.path.join(data_dir, file_path) if data_dir else file_path
 
         # 1. Raw disk inspection
         try:
@@ -338,8 +360,24 @@ def check_spectral_and_scaling(
 def check_labels_and_distribution(
     df: pd.DataFrame,
     label_map: Optional[Dict] = None,
+    task: Optional[str] = None,
+    num_classes: Optional[int] = None,
+    class_names: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Validates class labels resolve to 0..9 and checks class sample count and balance."""
+    """Validates class labels resolve to 0..(num_classes-1) and checks class sample count and balance."""
+    if task is not None and task in TASKS:
+        target_classes = list(TASKS[task]["classes"])
+        n_classes = len(target_classes)
+    elif class_names is not None:
+        target_classes = list(class_names)
+        n_classes = num_classes if num_classes is not None else len(target_classes)
+    elif num_classes is not None:
+        n_classes = num_classes
+        target_classes = [f"Class_{i}" for i in range(num_classes)]
+    else:
+        target_classes = list(LAND_COVER_CLASSES)
+        n_classes = NUM_CLASSES
+
     resolved_labels = []
     unmapped = []
 
@@ -358,13 +396,15 @@ def check_labels_and_distribution(
                 target = int(raw_label)
             except (ValueError, TypeError):
                 str_lbl = str(raw_label).strip()
-                if str_lbl in LAND_COVER_CLASSES:
+                if str_lbl in target_classes:
+                    target = target_classes.index(str_lbl)
+                elif str_lbl in LAND_COVER_CLASSES:
                     target = LAND_COVER_CLASSES.index(str_lbl)
                 else:
                     unmapped.append((idx, raw_label))
                     continue
 
-        if 0 <= target < NUM_CLASSES:
+        if 0 <= target < n_classes:
             resolved_labels.append(target)
         else:
             unmapped.append((idx, raw_label))
@@ -373,12 +413,12 @@ def check_labels_and_distribution(
         sample_unmapped = [u[1] for u in unmapped[:5]]
         return {
             "status": "FAIL",
-            "reason": f"{len(unmapped)} records have labels that cannot be mapped to the 10 known classes (0..9). First few: {sample_unmapped}",
+            "reason": f"{len(unmapped)} records have labels that cannot be mapped to the {n_classes} known classes (0..{n_classes - 1}). First few: {sample_unmapped}",
             "distribution": None,
         }
 
     counts = pd.Series(resolved_labels).value_counts().to_dict()
-    class_dist = {i: counts.get(i, 0) for i in range(NUM_CLASSES)}
+    class_dist = {i: counts.get(i, 0) for i in range(n_classes)}
 
     warnings_list = []
     min_count = min(class_dist.values())
@@ -387,8 +427,9 @@ def check_labels_and_distribution(
     # Check minimum samples per class
     for class_id, count in class_dist.items():
         if count < 20:
+            c_name = target_classes[class_id] if class_id < len(target_classes) else f"Class_{class_id}"
             warnings_list.append(
-                f"Class {class_id} ('{LAND_COVER_CLASSES[class_id]}') has only {count} samples (< 20 threshold)."
+                f"Class {class_id} ('{c_name}') has only {count} samples (< 20 threshold)."
             )
 
     # Check class imbalance ratio
@@ -402,13 +443,15 @@ def check_labels_and_distribution(
         warnings_list.append("One or more classes have 0 samples in manifest!")
 
     status = "WARN" if warnings_list else "PASS"
-    reason = "; ".join(warnings_list) if warnings_list else f"All {len(df)} samples map to 10 classes with balanced distribution (ratio {max_count / max(1, min_count):.1f}x)."
+    reason = "; ".join(warnings_list) if warnings_list else f"All {len(df)} samples map to {n_classes} classes with balanced distribution (ratio {max_count / max(1, min_count):.1f}x)."
 
     return {
         "status": status,
         "reason": reason,
         "distribution": class_dist,
         "warnings": warnings_list,
+        "class_names": target_classes,
+        "num_classes": n_classes,
     }
 
 
@@ -518,6 +561,8 @@ def check_model_compatibility(
     device_str: Optional[str] = None,
     scale_divisor: float = DEFAULT_SCALE_DIVISOR,
     label_map: Optional[Dict] = None,
+    task: Optional[str] = None,
+    num_classes: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Builds FusionNet with active channel count, executes forward+backward pass on real GPU mini-batch."""
     if mask_tensor is None:
@@ -532,9 +577,11 @@ def check_model_compatibility(
         device = torch.device(device_str)
 
     active_channels = int(mask_tensor.sum().item())
+    n_classes = len(TASKS[task]["classes"]) if (task and task in TASKS) else (num_classes or NUM_CLASSES)
+
     try:
         model = FusionNet(
-            num_classes=NUM_CLASSES,
+            num_classes=n_classes,
             total_bands=NUM_BANDS,
             selected_channels=active_channels,
         ).to(device)
@@ -552,6 +599,8 @@ def check_model_compatibility(
         scale_divisor=scale_divisor,
         label_map=label_map,
         augment=False,
+        task=task,
+        num_classes=n_classes,
     )
 
     images = []
@@ -580,7 +629,7 @@ def check_model_compatibility(
             "reason": f"Forward pass crashed: {e}",
         }
 
-    expected_logits = (batch_size, NUM_CLASSES)
+    expected_logits = (batch_size, n_classes)
     expected_embeddings = (batch_size, 1216)
     if logits.shape != expected_logits:
         return {
@@ -726,6 +775,8 @@ def validate_integration(
     data_dir: Optional[str] = None,
     device: Optional[str] = None,
     scale_divisor: float = DEFAULT_SCALE_DIVISOR,
+    task: Optional[str] = None,
+    num_classes: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Executes all validation checks and returns a structured dictionary of results.
@@ -777,6 +828,8 @@ def validate_integration(
         sample_size=sample_size,
         scale_divisor=scale_divisor,
         label_map=label_map,
+        task=task,
+        num_classes=num_classes,
     )
     checks_summary.append({
         "component": "Data Ingestion",
@@ -798,14 +851,19 @@ def validate_integration(
     })
 
     # 4. Labels & Distribution
-    res_labels = check_labels_and_distribution(df=df, label_map=label_map)
+    res_labels = check_labels_and_distribution(
+        df=df,
+        label_map=label_map,
+        task=task,
+        num_classes=num_classes,
+    )
     checks_summary.append({
         "component": "Data Ingestion",
         "check": "Class Labels & Balance",
         "status": res_labels["status"],
         "details": res_labels["reason"],
     })
-    meta_info["total_classes"] = NUM_CLASSES
+    meta_info["total_classes"] = res_labels.get("num_classes", NUM_CLASSES)
 
     # 5. Spatial Splits (location_id)
     res_spatial = check_spatial_splits(df=df)
@@ -850,6 +908,8 @@ def validate_integration(
             device_str=device,
             scale_divisor=scale_divisor,
             label_map=label_map,
+            task=task,
+            num_classes=num_classes,
         )
     checks_summary.append({
         "component": "Module 3 Model",
@@ -908,6 +968,8 @@ def main():
     parser.add_argument("--data_dir", type=str, default=None, help="Base data directory for tiles (default: dirname of manifest)")
     parser.add_argument("--device", type=str, default=None, help="Device for model test ('cuda' or 'cpu')")
     parser.add_argument("--scale_divisor", type=float, default=DEFAULT_SCALE_DIVISOR, help="Scale divisor for raw DN tiles")
+    parser.add_argument("--task", type=str, default=None, choices=list(TASKS.keys()), help="Task configuration name")
+    parser.add_argument("--num_classes", type=int, default=None, help="Number of classes override")
 
     args = parser.parse_args()
 
@@ -916,6 +978,8 @@ def main():
     print("=" * 80)
     print(f"Manifest File  : {args.manifest}")
     print(f"Band Mask File : {args.mask_path}")
+    if args.task:
+        print(f"Task Name      : {args.task}")
     if args.label_map:
         print(f"Label Map JSON : {args.label_map}")
     print(f"Sample Count   : {args.sample}")
@@ -929,6 +993,8 @@ def main():
         data_dir=args.data_dir,
         device=args.device,
         scale_divisor=args.scale_divisor,
+        task=args.task,
+        num_classes=args.num_classes,
     )
 
     # Print Itemized Results
@@ -955,13 +1021,16 @@ def main():
         if results['labels_res']['distribution'] is not None:
             dist = results['labels_res']['distribution']
             tot = sum(dist.values())
-            print("\n  Land Cover Class Distribution:")
+            target_classes = results['labels_res'].get('class_names', LAND_COVER_CLASSES)
+            n_cls = len(target_classes)
+            print("\n  Target Class Distribution:")
             print("  ID | Class Name                 | Count | Share (%)")
             print("  " + "-" * 50)
-            for cid in range(NUM_CLASSES):
+            for cid in range(n_cls):
                 cnt = dist.get(cid, 0)
                 pct = (cnt / tot * 100.0) if tot > 0 else 0.0
-                print(f"  {cid:>2} | {LAND_COVER_CLASSES[cid]:<26} | {cnt:>5} | {pct:>6.2f}%")
+                cname = target_classes[cid] if cid < len(target_classes) else f"Class_{cid}"
+                print(f"  {cid:>2} | {cname:<26} | {cnt:>5} | {pct:>6.2f}%")
             print()
 
     if results['spatial_res']:
