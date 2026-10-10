@@ -75,7 +75,16 @@ def generate_fake_dataset(
         else:
             split = "train"
 
-        location_id = f"LOC_REGION_{i // 4:02d}"
+        # Stratified location assignment ensuring regions never cross split boundaries
+        val_cutoff = val_instances * NUM_CLASSES
+        test_cutoff = (val_instances + test_instances) * NUM_CLASSES
+        if split == "val":
+            loc_idx = i // 4
+        elif split == "test":
+            loc_idx = 20 + (i - val_cutoff) // 4
+        else:
+            loc_idx = 40 + (i - test_cutoff) // 4
+        location_id = f"LOC_REGION_{loc_idx:02d}"
 
         if use_npy:
             tile_filename = f"tile_{i:03d}.npy"

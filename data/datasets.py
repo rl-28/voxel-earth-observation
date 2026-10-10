@@ -159,7 +159,11 @@ class RealSentinel2Dataset(BaseSentinel2Dataset):
         if ext == ".npy":
             arr = np.load(full_path, mmap_mode="r")
             if arr.ndim != 3:
-                raise ValueError(f"Expected 3D tile array, got {arr.ndim}D with shape {arr.shape} in {file_path}")
+                shape_str = str(arr.shape)
+                if hasattr(arr, "_mmap") and arr._mmap is not None:
+                    arr._mmap.close()
+                del arr
+                raise ValueError(f"Expected 3D tile array, got {arr.ndim}D with shape {shape_str} in {file_path}")
 
             # Auto-detect channel layout: (C, H, W) vs (H, W, C)
             if arr.shape[0] == NUM_BANDS:
@@ -167,8 +171,12 @@ class RealSentinel2Dataset(BaseSentinel2Dataset):
             elif arr.shape[2] == NUM_BANDS:
                 arr = np.transpose(arr, (2, 0, 1))  # convert to (C, H, W)
             else:
+                shape_str = str(arr.shape)
+                if hasattr(arr, "_mmap") and arr._mmap is not None:
+                    arr._mmap.close()
+                del arr
                 raise ValueError(
-                    f"Tile has invalid band count: shape {arr.shape}. Expected {NUM_BANDS} bands (either (13,H,W) or (H,W,13))."
+                    f"Tile has invalid band count: shape {shape_str}. Expected {NUM_BANDS} bands (either (13,H,W) or (H,W,13))."
                 )
 
         elif ext in [".tif", ".tiff"]:
