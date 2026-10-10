@@ -25,7 +25,7 @@ def fake_dataset_dir():
     data_dir = "data/fake_dataset"
     if not os.path.exists(os.path.join(data_dir, "manifest.csv")):
         from tools.make_fake_dataset import generate_fake_dataset
-        generate_fake_dataset(output_dir=data_dir, num_samples=20)
+        generate_fake_dataset(output_dir=data_dir, num_samples=40)
     return data_dir
 
 

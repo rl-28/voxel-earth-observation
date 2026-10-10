@@ -63,9 +63,19 @@ def generate_fake_dataset(
         use_npy = (i < num_samples // 2) or not HAS_RASTERIO
 
         # Stratified split allocation ensuring all classes exist proportionally across train, val, and test
-        total_instances = max(3, num_samples // NUM_CLASSES)
-        val_instances = max(1, int(total_instances * 0.15))
-        test_instances = max(1, int(total_instances * 0.15))
+        total_instances = max(1, num_samples // NUM_CLASSES)
+        if total_instances >= 3:
+            val_instances = max(1, int(total_instances * 0.15))
+            test_instances = max(1, int(total_instances * 0.15))
+            if val_instances + test_instances >= total_instances:
+                val_instances = 1
+                test_instances = 1
+        elif total_instances == 2:
+            val_instances = 1
+            test_instances = 0
+        else:
+            val_instances = 0
+            test_instances = 0
 
         class_instance = i // NUM_CLASSES
         if class_instance < val_instances:
