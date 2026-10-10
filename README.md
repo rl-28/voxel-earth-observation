@@ -1,30 +1,92 @@
-# VOXEL: Earth Observation & Spectral Intelligence
+# VOXEL: Task-Adaptive Earth Observation & Spectral Intelligence Pipeline
 
 > Physics-Guided Band Selection and Hybrid CNN-ViT Multimodal Fusion for Satellite Earth Observation and Land Cover Classification.
 
 ---
 
-## 🛰️ Module 3 Overview (Deep Learning, Explainability & Vector Retrieval)
+## 🌍 Project Overview
 
-Module 3 delivers the neural classifier and similarity engine for the VOXEL framework:
-- **Hybrid Classifier (FusionNet):** Combines **XNANet CNN** (1024-dim spatial texture representation) with **Tiny-32 Vision Transformer** (192-dim spectral attention representation) into a unified **1216-dimensional embedding** followed by a 10-class land cover head.
-- **Dynamic Spectral Slicing:** Dynamically handles any arbitrary active channel count (e.g. 3, 6, 9, 13 bands) selected by metaheuristic optimization.
-- **Explainable AI (SHAP):** Permutation SHAP channel attribution quantifying feature importance across active spectral bands.
-- **Sub-Second Vector Search (FAISS):** Fast cosine similarity search on 1216-dim tile representations for geospatial scene retrieval.
+**VOXEL** is an end-to-end spatial-spectral satellite processing and land cover intelligence pipeline. Designed under strict hardware and computational efficiency constraints (16 GB RAM ceiling, edge-deployable training/inference), VOXEL compresses high-dimensional satellite imagery, isolates optimal task-relevant spectral bands, classifies terrain with a hybrid deep learning model, and provides sub-second similarity search with explainable AI attribution.
+
+### End-to-End System Architecture
+
+```text
+               User Query / Task Definition
+                            ↓
+               [Stage 0] Natural Language Query Compiler & Geocoding
+                            ↓ Execution Contract
+               [Module 1] Geospatial Ingestion & Signal Processing
+                   (STAC → Reprojection → 256x256 Tiles → Z-Score → 3D-DWT → Albedo Filter)
+                            ↓ Spatial-Spectral Tensor (256, 256, 13)
+               [Module 2] Physics-Guided Metaheuristic Band Optimization
+                   (Domains → Chaotic Seeding → Binary Whale Optimization → Scorecard)
+                            ↓ 13-Element Binary Mask / Selected Indices
+               [Module 3] Hybrid Deep Learning, Explainability & Retrieval
+                   (FusionNet: XNANet CNN + Tiny-32 ViT → 1216-dim Embedding → 10 Classes)
+                            ↓
+               Outputs: Land Cover Class + SHAP Attribution + FAISS Vector Search
+```
 
 ---
 
-## 🛠️ Environment & Prerequisites
+## 👥 Team Structure & Module Ownership
 
-- **Python Version:** `Python 3.10.11` (Recommended for PyTorch CUDA, Numba, and SHAP compatibility)
-- **Compute:** NVIDIA CUDA GPU (e.g. RTX 3050 Laptop GPU, CUDA 12.1) or CPU fallback
+| Member | Module | Role | Core Responsibilities |
+| :--- | :--- | :--- | :--- |
+| **Arya Suryavanshi** | **Module 1** | Ingestion & Signal Processing Lead | STAC Sentinel-2 acquisition, raster tiling & CRS reprojection, Z-score normalization, 3D Discrete Wavelet Transform (3D-DWT), albedo/cloud filtering, Streamlit viewer. |
+| **Shreeya Joshi** | **Module 2** | Optimization & Math Core Lead | Stage 0 query parser, physics-guided spectral partitioning, Chebyshev chaotic seeding with OBL, Binary Whale Optimization Algorithm (BWOA), Green-AI multi-objective fitness scorecard. |
+| **Riya Lepkar** | **Module 3** | Deep Learning & Search Architect | Hybrid FusionNet (CNN + ViT), dynamic spectral slicing, PyTorch GPU training pipeline, SHAP channel explainability, FAISS cosine similarity vector search, integration contract. |
 
-### Setup
+---
+
+## 🛰️ Architecture Breakdown by Module
+
+### Stage 0: Natural Language Query Compiler & Geocoding
+- **Natural Language Parsing:** Translates natural language user prompts (e.g. *"Assess wheat crop health in Punjab"*) into a structured `VoxelExecutionContract`.
+- **Live Geocoding:** Resolves administrative names to precise bounding boxes (BBOX) using OpenStreetMap Nominatim with offline fallback.
+- **Task Profiling:** Maps task intents to priority spectral domains (VISIBLE, NIR_RED_EDGE, SWIR, AUXILIARY) and band budgets.
+
+### Module 1: Ingestion & Signal Processing
+- **STAC Ingestion:** Automated search and downloading of Sentinel-2 L2A tiles via Copernicus Data Space (`pystac-client`).
+- **Windowed Raster Tiling:** Splits raw GeoTIFF assets into non-overlapping $256 \times 256$ tiles with bilinear CRS alignment (`rasterio`).
+- **Z-Score Normalization:** Per-band radiometric normalization: $Z = (X - \mu) / \sigma$.
+- **3D Discrete Wavelet Transform (3D-DWT):** Multi-resolution spatial-spectral decomposition using Daubechies wavelets (`PyWavelets` `db1`).
+- **Albedo & Reflection Filtering:** Masking of cloud glare, water specular reflection, and deep shadows based on reflectance thresholds.
+- **Interactive UI:** Streamlit interface (`app.py`) for visual validation of tiles and wavelet sub-bands.
+
+### Module 2: Metaheuristic Optimization Core
+- **Physics-Guided Spectral Partitioning:** Groups 13 Sentinel-2 bands into 4 physical domains: VISIBLE, NIR/RED_EDGE, SWIR, and AUXILIARY.
+- **Chebyshev Chaotic Seeding & OBL:** Initializes search population using chaotic map dynamics and Opposition-Based Learning to escape local optima.
+- **Binary Whale Optimization Algorithm (BWOA):** Employs encircling prey, bubble-net logarithmic spirals, and exploration behaviors with a Sigmoid transfer function $S(v) = 1/(1+e^{-v})$.
+- **Green-AI Scorecard:** Evaluates candidate masks against a composite objective:
+  $$\text{Fitness} = w_{\text{acc}} \cdot \text{Acc}_{\text{KNN}} + w_{\text{jm}} \cdot \text{JM}_{\text{norm}} - w_{\text{band}} \cdot \frac{k}{13} - \text{ExcessPenalty} - \text{RAMPenalty}$$
+- **Domain Balance Guard:** Ensures selected band subsets preserve at least one channel across VISIBLE, NIR, and SWIR domains.
+
+### Module 3: Deep Learning, Explainability & Vector Retrieval
+- **Hybrid FusionNet:** Multimodal dual-branch neural architecture:
+  - **XNANet CNN Backbone:** Extracts 1024-dimensional spatial and local textural features.
+  - **Tiny-32 Vision Transformer (ViT):** Extracts 192-dimensional global spectral attention representations.
+  - **Feature Fusion:** Concat-linear projection creates a rich **1216-dimensional embedding** followed by a 10-class land cover head.
+- **Dynamic Spectral Slicing:** Operates transparently on variable active channel counts (e.g. 4, 6, 8, or 13 bands) dictated by the Module 2 mask.
+- **Permutation SHAP Attribution:** Quantifies per-band importance scores to verify model reliance on physical spectral signatures.
+- **FAISS Vector Index:** Fast cosine similarity indexing of 1216-dim embeddings for real-time nearest-neighbor terrain search.
+
+---
+
+## 🛠️ Environment Setup & Installation
+
+- **Certified Environment:** `Python 3.10.11`
+- **Compute:** NVIDIA CUDA GPU (e.g. RTX 3050 Laptop GPU, CUDA 12.1) with CPU fallback
+
 ```bash
-# 1. Install PyTorch with CUDA 12.1 support
+# 1. Clone repository
+git clone https://github.com/your-org/voxel-earth-observation.git
+cd voxel-earth-observation
+
+# 2. Install PyTorch with CUDA 12.1 support
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
-# 2. Install dependencies
+# 3. Install core dependencies
 pip install -r requirements.txt
 ```
 
@@ -32,125 +94,71 @@ pip install -r requirements.txt
 
 ## 🚀 Execution & Command Reference
 
-### 1. Synthetic Fake Dataset Generator
-Generate synthetic tiles (.npy and .tif) on disk for rapid integration testing:
+### 1. Stage 0 & Module 2 Interactive Test Bench
+Run the interactive CLI REPL or test specific Earth observation queries:
 ```bash
-python tools/make_fake_dataset.py --output_dir data/fake_dataset --num_samples 40
+# Launch interactive console
+python scripts/demo_cli.py
+
+# Run batch showcase across biomes (Agriculture, Urban, Water, Forest, Glaciers)
+python scripts/demo_cli.py --batch
+
+# Direct query execution
+python scripts/demo_cli.py "Assess crop health in Punjab"
 ```
 
-### 2. GPU Model Training
+### 2. Module 1 Streamlit Interface
+Launch the ingestion viewer to inspect Sentinel-2 scenes, tiling, and 3D wavelets:
 ```bash
-# Run with synthetic mock data
-python train_gpu.py --mock --epochs 50 --batch_size 8
+streamlit run app.py
+```
 
-# Run with on-disk satellite dataset
+### 3. Synthetic Dataset Generation (Module 3)
+Generate standardized spatial-spectral tiles and labels for testing:
+```bash
+python tools/make_fake_dataset.py --output_dir data/fake_dataset --num_samples 500
+```
+
+### 4. GPU Training (Module 3)
+```bash
+# Fast mock verification run
+python train_gpu.py --mock --epochs 1 --checkpoint_dir checkpoints/_test_tmp
+
+# Full GPU training on dataset with custom band mask
 python train_gpu.py \
   --manifest data/fake_dataset/manifest.csv \
   --mask_path config/example_band_mask.json \
-  --epochs 50 \
+  --epochs 40 \
   --batch_size 8 \
   --lr 1e-4 \
-  --grad_accum_steps 1
+  --amp
 ```
 
-### 3. Model Evaluation on Test Split
-Computes Overall Accuracy, Macro-F1, Mean IoU, per-class metrics, and saves `results/confusion_matrix.png`:
+### 5. Explainability & FAISS Index Build
 ```bash
-python evaluate.py --checkpoint checkpoints/best_fusion_net.pth --manifest data/fake_dataset/manifest.csv
-# Or with mock data:
-python evaluate.py --checkpoint checkpoints/best_fusion_net.pth --mock
-```
-
-### 4. Spectral Band Selection Benchmark
-Compares (a) All 13 bands vs (b) Optimized mask vs (c) Random control mask and outputs `results/band_selection_comparison.md`:
-```bash
-python tools/compare_masks.py --mask_path config/example_band_mask.json --mock --epochs 3
-```
-
-### 5. Build Explainability & FAISS Retrieval Database
-Regenerates `checkpoints/shap_band_importance.png`, `checkpoints/terrain_index.faiss`, and metadata:
-```bash
+# Generate SHAP summary plots and build FAISS index from trained model
 python build_explainability.py \
   --checkpoint checkpoints/best_fusion_net.pth \
   --manifest data/fake_dataset/manifest.csv \
-  --mask_path config/example_band_mask.json
+  --output_dir checkpoints
 ```
 
-### 6. End-to-End Inference & Vector Search Demo
-Classifies incoming tiles and retrieves top-5 similar terrain scenes:
+### 6. Single-Tile Inference & Similar Terrain Retrieval
 ```bash
-python demo_module3.py
+python inference.py \
+  --input data/fake_dataset/tiles/tile_0000.npy \
+  --checkpoint checkpoints/best_fusion_net.pth \
+  --index checkpoints/terrain_index.faiss \
+  --top_k 5
 ```
 
-### 7. Run Test Suite (pytest)
+### 7. Running the Unified Test Suite
 ```bash
-pytest -q
+# Run all unit and integration tests across Module 1, 2, and 3
+python -m pytest -q
 ```
 
 ---
 
-## 🤝 How to Integrate (Pre-Merge Handoff)
-
-Module 3 is fully decoupled from teammates' active feature branches via configuration contracts.
-
-For complete data schemas, tensor orderings, and checklist specifications, consult:
-👉 **[Integration Contract (docs/INTEGRATION_CONTRACT.md)](docs/INTEGRATION_CONTRACT.md)**
-
-### When Module 1 (Data Ingestion) Arrives:
-- Ensure incoming tiles follow the contract: `float32` tensor `(13, 256, 256)` with values in `[0.0, 1.0]`.
-- Provide a `manifest.csv` referencing `tile_path`, `label`, and optional `location_id`.
-- Run: `python train_gpu.py --manifest <path_to_manifest.csv>`
-
-### When Module 2 (Band Optimization) Arrives:
-- Ensure the candidate mask is exported as JSON (see `config/example_band_mask.json`) or binary `.npy`/`.pt` array of shape `(13,)`.
-- Run: `python train_gpu.py --manifest <manifest> --mask_path <path_to_mask.json>`
-
----
-
-## 📁 Repository Structure
-
-```
-voxel-earth-observation/
-├── checkpoints/             # Checkpoints, FAISS indices & README.md
-├── config/                  # Centralized constants & example masks
-│   ├── constants.py
-│   └── example_band_mask.json
-├── data/                    # Dataset loaders & augmentation
-│   ├── datasets.py
-│   └── fake_dataset/        # Local synthetic testing dataset
-├── docs/                    # Integration contract & readiness reports
-│   ├── INTEGRATION_CONTRACT.md
-│   └── MERGE_READINESS.md
-├── explainability/          # SHAP attribution & FAISS vector search
-│   ├── faiss_search.py
-│   └── shap_engine.py
-├── models/                  # CNN, ViT, and FusionNet architectures
-│   ├── cnn_backbone.py
-│   ├── fusion_net.py
-│   └── vit_transformer.py
-├── results/                 # Training logs, confusion matrices, benchmarks
-├── tests/                   # Pytest automated test suite
-├── tools/                   # Benchmarks & dataset generators
-│   ├── compare_masks.py
-│   └── make_fake_dataset.py
-├── utils/                   # Pluggable band mask loaders
-│   └── band_mask.py
-├── build_explainability.py  # SHAP/FAISS artifact builder CLI
-├── demo_module3.py          # Interactive GPU inference demo
-├── evaluate.py              # Test split evaluation script
-├── inference.py             # Inference API & top-k retrieval
-├── train_gpu.py             # Hardened GPU training script
-├── requirements.txt         # Pinned working dependencies
-└── README.md
-```
-
----
-
-## 👥 Team & Attribution
-
-- **Arya Suryavanshi** - Data Ingestion & Preprocessing (Module 1)
-- **Shreeya Joshi** - Physics-Guided & Metaheuristic Band Optimization (Module 2)
-- **Riya Lepkar** - Deep Learning Training, Feature Fusion, Explainability & Vector Retrieval (Module 3)
-
-**Academic Mentor:** Dr. Uma Jaishankar  
-*Vidyalankar Institute of Technology (VIT)*
+## 📜 Integration Contract Reference
+For interface contracts, tensor shapes, manifest specifications, and handoff protocols between modules, see [docs/INTEGRATION_CONTRACT.md](file:///c:/Users/Riya/VOXEL/voxel-earth-observation/docs/INTEGRATION_CONTRACT.md).

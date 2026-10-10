@@ -1,8 +1,9 @@
-# VOXEL Module 3: Deep Learning, Explainability & Retrieval Pipeline
-# Python 3.10.11 Environment
+# VOXEL Project Unified Requirements
+# Certified for Python 3.10.11 Environment
 # Note: For GPU CUDA 12.1 acceleration, install torch and torchvision via:
 # pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
+# Core Deep Learning, Inference & Retrieval (Module 3)
 torch>=2.5.1
 torchvision>=0.20.1
 timm==1.0.30
@@ -17,3 +18,12 @@ matplotlib==3.10.9
 seaborn==0.13.2
 tqdm==4.70.1
 pytest==9.1.1
+
+# Geospatial Ingestion, Signal Processing & Wavelets (Module 1)
+PyWavelets==1.8.0
+pystac-client==0.9.0
+streamlit>=1.20.0
+
+# Natural Language Query Compilation & Geocoding (Stage 0 & Module 2)
+google-generativeai>=0.8.0
+geopy>=2.4.0

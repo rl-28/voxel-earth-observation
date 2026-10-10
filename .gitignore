@@ -4,24 +4,60 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Testing caches
+# Testing caches & notebooks
 .pytest_cache/
+.ipynb_checkpoints/
+.coverage
+coverage.xml
 
 # Experiment results and scratch files
 results/
 scratch/
+temp/
+tmp/
+*.tmp
+output/
+outputs/
+logs/
+*.log
 
-# Dataset directories (ignore raw, processed, and synthetic datasets, keep data source package)
+# Dataset directories & large binary data files
+# (Source package data/ like data/__init__.py and data/datasets.py remains tracked)
 data/fake_dataset/
 data/raw/
 data/processed/
+data/synthetic/*.npy
+data/synthetic/metadata.json
+data/evaluation/**/*.npy
+data/evaluation/**/*.tif
+data/evaluation/**/*.tiff
+data/evaluation/**/*.jp2
 
-# PyTorch checkpoints and Vector Database artifacts
+# Geospatial binary rasters
+*.tif
+*.tiff
+*.jp2
+
+# Model checkpoints & binary index artifacts
 *.pth
 *.pt
 *.pth.tar
 *.faiss
+*.h5
+*.onnx
 checkpoints/splits.json
+
+# Environment variables & security credentials
+.env
+.env.*
+!.env.example
+secrets.json
+credentials.json
+*.key
+*.pem
+*.cert
+*.crt
+*_token.txt
 
 # Virtual environments
 .venv/
