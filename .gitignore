@@ -26,6 +26,7 @@ logs/
 data/fake_dataset/
 data/raw/
 data/processed/
+data/real_sample/
 data/synthetic/*.npy
 data/synthetic/metadata.json
 data/evaluation/**/*.npy

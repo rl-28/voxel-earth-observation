@@ -132,3 +132,112 @@ def test_bhunidhi_placeholder():
     provider = BhuNidhiProvider()
     with pytest.raises(NotImplementedError):
         provider.search_sentinel2_l2a()
+
+
+def test_earth_search_band_mapping():
+    from module1_ingestion.stac_downloader import EarthSearchSTACProvider
+    from module1_ingestion.config import EARTH_SEARCH_BAND_TO_ASSET, SENTINEL_2_L2A_SPECTRAL_BANDS
+
+    provider = EarthSearchSTACProvider()
+    assert provider.get_band_asset_key("B01") == "coastal"
+    assert provider.get_band_asset_key("B02") == "blue"
+    assert provider.get_band_asset_key("B03") == "green"
+    assert provider.get_band_asset_key("B04") == "red"
+    assert provider.get_band_asset_key("B08") == "nir"
+    assert provider.get_band_asset_key("B8A") == "nir08"
+    assert provider.get_band_asset_key("B11") == "swir16"
+    assert provider.get_band_asset_key("B12") == "swir22"
+
+    for b in SENTINEL_2_L2A_SPECTRAL_BANDS:
+        assert b in EARTH_SEARCH_BAND_TO_ASSET
+        assert provider.get_band_asset_key(b) == EARTH_SEARCH_BAND_TO_ASSET[b]
+
+
+def test_stac_provider_factory_and_env():
+    from module1_ingestion.stac_downloader import (
+        get_stac_provider,
+        STACDownloader,
+        CopernicusSTACProvider,
+        EarthSearchSTACProvider
+    )
+
+    # Default is Copernicus
+    default_p = get_stac_provider()
+    assert isinstance(default_p, CopernicusSTACProvider)
+
+    # Explicit constructor argument
+    es_p = get_stac_provider("earth_search")
+    assert isinstance(es_p, EarthSearchSTACProvider)
+
+    # Env variable STAC_PROVIDER
+    with patch.dict(os.environ, {"STAC_PROVIDER": "earth_search"}):
+        env_p = get_stac_provider()
+        assert isinstance(env_p, EarthSearchSTACProvider)
+
+    # High-level STACDownloader
+    downloader_default = STACDownloader()
+    assert isinstance(downloader_default.provider, CopernicusSTACProvider)
+
+    downloader_es = STACDownloader(provider="earth_search")
+    assert isinstance(downloader_es.provider, EarthSearchSTACProvider)
+
+    with pytest.raises(ValueError, match="Unknown STAC provider"):
+        get_stac_provider("invalid_provider")
+
+
+@patch("module1_ingestion.stac_downloader.Client")
+def test_earth_search_search_mocked(mock_client_class, valid_aoi):
+    from module1_ingestion.stac_downloader import EarthSearchSTACProvider
+    mock_client = MagicMock()
+    mock_client_class.open.return_value = mock_client
+    mock_search = MagicMock()
+    mock_item = MagicMock()
+    mock_item.id = "S2_test_es"
+    mock_search.items.return_value = [mock_item]
+    mock_client.search.return_value = mock_search
+
+    provider = EarthSearchSTACProvider()
+    results = provider.search_sentinel2_l2a(valid_aoi, "2023-05-01", "2023-05-31", cloud_cover=10.0)
+
+    assert len(results) == 1
+    assert results[0].id == "S2_test_es"
+    mock_client.search.assert_called_once_with(
+        collections=["sentinel-2-l2a"],
+        intersects=valid_aoi,
+        datetime="2023-05-01/2023-05-31",
+        query={"eo:cloud_cover": {"lte": 10.0}},
+        max_items=10
+    )
+
+
+@patch("module1_ingestion.stac_downloader.requests.get")
+def test_earth_search_download_bands_mocked(mock_get, tmp_path):
+    from module1_ingestion.stac_downloader import EarthSearchSTACProvider
+    from module1_ingestion.config import EARTH_SEARCH_BAND_TO_ASSET
+
+    mock_resp = MagicMock()
+    mock_resp.iter_content.return_value = [b"raster_data"]
+    mock_get.return_value = mock_resp
+
+    provider = EarthSearchSTACProvider()
+
+    # Construct mock item with Earth Search asset keys
+    mock_item = MagicMock()
+    mock_item.id = "test_item_es"
+    mock_assets = {}
+    for b_name, asset_name in EARTH_SEARCH_BAND_TO_ASSET.items():
+        asset_mock = MagicMock()
+        asset_mock.href = f"https://mock-s3.aws.com/{asset_name}.tif"
+        mock_assets[asset_name] = asset_mock
+    mock_item.assets = mock_assets
+
+    target_dir = tmp_path / "bands"
+    band_paths = provider.download_bands(mock_item, str(target_dir))
+
+    assert len(band_paths) == 12
+    for b_name in EARTH_SEARCH_BAND_TO_ASSET.keys():
+        assert b_name in band_paths
+        dest_file = target_dir / f"{b_name}.tif"
+        assert os.path.exists(dest_file)
+        assert band_paths[b_name] == str(dest_file)
+
