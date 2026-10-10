@@ -226,3 +226,54 @@ def test_module1_keep_water_preserves_water_pixels():
     # Non-water shadow half should still be zeroed
     assert np.all(res_water.processed_tensor[128:, :, :] == 0.0)
 
+
+def test_module1_for_module3_factory():
+    """
+    Verifies that Module1Pipeline.for_module3(**overrides) correctly presets
+    all necessary flags for Module 3 while preserving constructor defaults.
+    """
+    # 1. Constructor defaults stay unchanged
+    default_p = Module1Pipeline()
+    assert default_p.output_mode == "zscore"
+    assert default_p.output_13_bands is False
+    assert default_p.spatial_only_wavelet is False
+    assert default_p.keep_water is False
+
+    # 2. for_module3 presets Module 3 requirements
+    m3_p = Module1Pipeline.for_module3()
+    assert m3_p.output_mode == "reflectance"
+    assert m3_p.output_13_bands is True
+    assert m3_p.spatial_only_wavelet is True
+    assert m3_p.keep_water is True
+
+    # 3. Supports overrides
+    custom_p = Module1Pipeline.for_module3(enable_albedo_filter=False)
+    assert custom_p.enable_albedo_filter is False
+    assert custom_p.spatial_only_wavelet is True
+
+    # 4. End-to-end synthetic tile processing
+    rng = np.random.default_rng(999)
+    raw_12 = np.zeros((256, 256, 12), dtype=OUTPUT_DTYPE)
+    for c in range(12):
+        raw_12[:, :, c] = (c + 1) * 700.0 + rng.uniform(0, 50, size=(256, 256)).astype(OUTPUT_DTYPE)
+
+    # Insert water patch in corner
+    raw_12[:30, :30, 2] = 800.0  # Green B03
+    raw_12[:30, :30, 3] = 200.0  # Red B04
+    raw_12[:30, :30, 7] = 100.0  # NIR B08
+
+    res = m3_p.process_tile({"tile_data": raw_12, "row_idx": 0, "col_idx": 0})
+    tensor = res.processed_tensor
+
+    assert tensor.shape == (13, 256, 256)
+    assert tensor.dtype == OUTPUT_DTYPE
+    assert tensor.min() >= 0.0
+    assert tensor.max() <= 1.0
+    assert np.all(tensor[10] == 0.0)  # B10 placeholder
+
+    # Verify bands 0 and 1 are distinct
+    assert not np.allclose(tensor[0], tensor[1], atol=1e-5)
+    # Verify water patch is not zeroed
+    assert (tensor[2, :30, :30] > 0.0).any()
+
+

@@ -31,6 +31,19 @@ Index 11: B11 (SWIR 1 - 1610 nm)
 Index 12: B12 (SWIR 2 - 2190 nm)
 ```
 
+### 1.1 Ingestion Factory Method: `Module1Pipeline.for_module3()`
+
+To bridge Module 1 data processing directly with Module 3's learning requirements without altering default module configurations, use the factory method:
+```python
+pipeline = Module1Pipeline.for_module3(**overrides)
+```
+
+This factory configures four crucial flags:
+1. `output_mode="reflectance"`: Produces physical surface reflectance in `[0.0, 1.0]` (`DN / 10000.0`) instead of Z-score normalization.
+2. `output_13_bands=True`: Emits channel-first tensors of shape `(13, 256, 256)` with placeholder $B10$ inserted at index 10.
+3. `spatial_only_wavelet=True`: Restricts the discrete wavelet transform (DWT) to spatial dimensions (`axes=(0, 1)`). In default 3D DWT (`axes=(0, 1, 2)`), setting detail coefficients to zero during approximation reconstruction discards high-frequency spectral detail, causing Haar wavelets to average adjacent channel pairs (`(x_0 + x_1)/2`). This previously created 6 pairs of identical duplicate bands (`B01=B02, B03=B04, B05=B06, B07=B08, B8A=B09, B11=B12`). Spatial-only wavelet preserves 100% of the spectral differentiation across all bands.
+4. `keep_water=True`: Protects water pixels from being zeroed out. The default cloud-shadow heuristic flags pixels where `B04 < 0.05` and `B08 < 0.05`. Because water bodies strongly absorb in both Red and NIR, they were mistakenly zeroed as cloud shadow patches. `keep_water=True` checks for the physical water signature (`NDWI > 0` and `B03 > B08`) to preserve valid water pixels.
+
 ---
 
 ## 2. Land Cover Target Classes

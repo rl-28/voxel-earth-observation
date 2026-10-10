@@ -59,6 +59,26 @@ class Module1Pipeline:
         self.spatial_only_wavelet = spatial_only_wavelet
         self.keep_water = keep_water
 
+    @classmethod
+    def for_module3(cls, **overrides) -> "Module1Pipeline":
+        """
+        Factory method configured specifically for Module 3 model consumption:
+        - output_mode="reflectance": physical surface reflectance in [0, 1] (DN / 10000.0)
+        - output_13_bands=True: produces (13, 256, 256) channel-first tensor matching data contract
+        - spatial_only_wavelet=True: restricts DWT to spatial axes (0, 1) to avoid averaging adjacent spectral bands
+        - keep_water=True: preserves water pixels (NDWI > 0, B03 > B08) from being zeroed by cloud shadow filter
+        
+        Any keyword arguments passed in **overrides will override these default settings.
+        """
+        config = {
+            "output_mode": "reflectance",
+            "output_13_bands": True,
+            "spatial_only_wavelet": True,
+            "keep_water": True,
+        }
+        config.update(overrides)
+        return cls(**config)
+
     def process_scene(self, band_paths: Dict[str, str], reference_band_key: str = "B04") -> Generator[Module1Result, None, None]:
         """
         Executes the end-to-end Module 1 pipeline incrementally per tile.
