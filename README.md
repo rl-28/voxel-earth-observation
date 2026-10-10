@@ -6,14 +6,14 @@
 
 ## 🌍 Project Overview
 
-**VOXEL** is an end-to-end spatial-spectral satellite processing and land cover intelligence pipeline. Designed under strict hardware and computational efficiency constraints (16 GB RAM ceiling, edge-deployable training/inference), VOXEL compresses high-dimensional satellite imagery, isolates optimal task-relevant spectral bands, classifies terrain with a hybrid deep learning model, and provides sub-second similarity search with explainable AI attribution.
+**VOXEL** is an end-to-end spatial-spectral satellite data processing, feature optimization, and land cover classification system. Designed under strict hardware and computational efficiency constraints (16 GB RAM ceiling, edge-deployable training and inference), VOXEL compresses high-dimensional satellite imagery, isolates optimal task-relevant spectral bands, classifies terrain with a hybrid deep learning model, and provides sub-second similarity search with explainable AI attribution.
 
 ### End-to-End System Architecture
 
 ```text
                User Query / Task Definition
                             ↓
-               [Stage 0] Natural Language Query Compiler & Geocoding
+               [Stage 0] Natural Language Query Compiler & Geocoding (LLM + Nominatim)
                             ↓ Execution Contract
                [Module 1] Geospatial Ingestion & Signal Processing
                    (STAC → Reprojection → 256x256 Tiles → Z-Score → 3D-DWT → Albedo Filter)
@@ -41,35 +41,60 @@
 
 ## 🛰️ Architecture Breakdown by Module
 
-### Stage 0: Natural Language Query Compiler & Geocoding
-- **Natural Language Parsing:** Translates natural language user prompts (e.g. *"Assess wheat crop health in Punjab"*) into a structured `VoxelExecutionContract`.
-- **Live Geocoding:** Resolves administrative names to precise bounding boxes (BBOX) using OpenStreetMap Nominatim with offline fallback.
-- **Task Profiling:** Maps task intents to priority spectral domains (VISIBLE, NIR_RED_EDGE, SWIR, AUXILIARY) and band budgets.
+### Stage 0: Natural Language Query Compiler & Geospatial Geocoder
+- **Semantic Intent Extraction (`utils/llm_parser.py`)**: Translates unstructured, freeform human text into a strictly validated `VoxelExecutionContract`.
+  - Primary LLM: **Google Gemini 1.5 Flash** with JSON mode.
+  - Secondary Fallbacks: OpenAI (`gpt-4o-mini`) and Groq (`llama-3.1-8b-instant`).
+  - Offline Fallback: Deterministic keyword-boundary regex classifier.
+- **Spatial Geocoding to BBOX**: Geocodes location queries via `Nominatim` (OpenStreetMap) with a `0.0125°` coordinate offset around center lat/lon (~2.56 km × 2.56 km spatial footprint matching 256×256 pixels at 10m/pixel Sentinel-2 resolution).
+- **Task Profiles & Spectral Band Budgets**:
+  - `WATER_MOISTURE` (4 bands: SWIR-1 B11, SWIR-2 B12, NIR B08, Green B03)
+  - `CROP_HEALTH` (6 bands: Red-Edge B05–B07, NIR B08)
+  - `URBAN_INFRASTRUCTURE` (5 bands: Visible B02–B04, SWIR B11)
+  - `GENERAL_LANDCOVER` (8 bands: Visible, NIR, SWIR, Red-Edge)
 
 ### Module 1: Ingestion & Signal Processing
-- **STAC Ingestion:** Automated search and downloading of Sentinel-2 L2A tiles via Copernicus Data Space (`pystac-client`).
-- **Windowed Raster Tiling:** Splits raw GeoTIFF assets into non-overlapping $256 \times 256$ tiles with bilinear CRS alignment (`rasterio`).
-- **Z-Score Normalization:** Per-band radiometric normalization: $Z = (X - \mu) / \sigma$.
-- **3D Discrete Wavelet Transform (3D-DWT):** Multi-resolution spatial-spectral decomposition using Daubechies wavelets (`PyWavelets` `db1`).
-- **Albedo & Reflection Filtering:** Masking of cloud glare, water specular reflection, and deep shadows based on reflectance thresholds.
-- **Interactive UI:** Streamlit interface (`app.py`) for visual validation of tiles and wavelet sub-bands.
+- **STAC Ingestion (`module1_ingestion/stac_downloader.py`)**: Automated search and downloading of Sentinel-2 L2A tiles via Copernicus Data Space (`pystac-client`).
+- **Windowed Raster Tiling (`module1_ingestion/tile_processor.py`)**: Splits raw GeoTIFF assets into non-overlapping $256 \times 256$ tiles with bilinear CRS alignment (`rasterio`).
+- **Z-Score Normalization (`module1_ingestion/normalization.py`)**: Per-band radiometric normalization: $Z = (X - \mu) / \sigma$.
+- **3D Discrete Wavelet Transform (`module1_ingestion/wavelet_3d.py`)**: Multi-resolution spatial-spectral decomposition using Daubechies wavelets (`PyWavelets` `db1`).
+- **Albedo & Reflection Filtering (`module1_ingestion/albedo_filter.py`)**: Masking of cloud glare, water specular reflection, and deep shadows based on reflectance thresholds.
+- **Interactive UI (`app.py`)**: Streamlit interface for visual validation of tiles and wavelet sub-bands.
 
 ### Module 2: Metaheuristic Optimization Core
-- **Physics-Guided Spectral Partitioning:** Groups 13 Sentinel-2 bands into 4 physical domains: VISIBLE, NIR/RED_EDGE, SWIR, and AUXILIARY.
-- **Chebyshev Chaotic Seeding & OBL:** Initializes search population using chaotic map dynamics and Opposition-Based Learning to escape local optima.
-- **Binary Whale Optimization Algorithm (BWOA):** Employs encircling prey, bubble-net logarithmic spirals, and exploration behaviors with a Sigmoid transfer function $S(v) = 1/(1+e^{-v})$.
-- **Green-AI Scorecard:** Evaluates candidate masks against a composite objective:
-  $$\text{Fitness} = w_{\text{acc}} \cdot \text{Acc}_{\text{KNN}} + w_{\text{jm}} \cdot \text{JM}_{\text{norm}} - w_{\text{band}} \cdot \frac{k}{13} - \text{ExcessPenalty} - \text{RAMPenalty}$$
-- **Domain Balance Guard:** Ensures selected band subsets preserve at least one channel across VISIBLE, NIR, and SWIR domains.
+- **Physics-Guided Spectral Partitioning (`module2_optimization/physics_partitioning.py`)**: Groups 13 Sentinel-2 bands into 4 physical domains:
+  - `VISIBLE`: B02, B03, B04
+  - `NIR_RED_EDGE`: B05, B06, B07, B08, B8A
+  - `SWIR`: B11, B12
+  - `AUXILIARY`: B01, B09, B10
+- **Green-AI Multi-Objective Fitness Scorecard (`module2_optimization/fitness_scorecard.py`)**:
+  $$\text{Fitness}(X) = w_{\text{acc}} \cdot \text{Accuracy} + w_{\text{jm}} \cdot \text{JM}_{\text{norm}} - w_{\text{band}} \cdot \left(\frac{\|X\|_1}{13}\right) - \text{OverBudgetPenalty} - \text{RAMPenalty}$$
+  - Fast $k$-NN / surrogate accuracy evaluated on subsampled train/test partitions.
+  - Regularized Jeffries-Matusita (JM) distance ($\epsilon = 10^{-6}$) with determinant safeguards.
+  - Deterministic $K$-Means ($k=6$) pseudo-labeling when external annotations are omitted.
+  - Hard step penalty (100.0) applied if estimated tensor footprint exceeds the 16.0 GB hardware ceiling.
+  - Memoization cache keyed by binary mask byte sequences.
+- **Chebyshev Chaotic Seeding & Opposition-Based Learning (`module2_optimization/chaotic_seeding.py`)**:
+  - Generates ergodic initial populations in $[-1, 1]$ via Chebyshev map ($x_{k+1} = \cos(d \cdot \arccos(x_k))$).
+  - Enforces spectral budget constraints ($1 \le \|X\|_1 \le \text{target\_band\_count}$) via deterministic bit repair.
+  - Applies Opposition-Based Learning ($X_{\text{opp}} = 1 - X$) and selects the top $N$ fittest individuals.
+- **Binary Whale Optimization Algorithm (`module2_optimization/bio_search.py`)**:
+  - Sigmoid transfer function $S(v) = \frac{1}{1 + e^{-v}}$ for discrete bit updates.
+  - Encircling prey, random exploration ($|A| \ge 1$), and logarithmic bubble-net spiral attack.
+  - Monotonic best fitness convergence tracking with patience-based early stopping.
+- **Orchestrator & Physics Domain Balance Guard (`module2_optimization/orchestrator.py`)**:
+  - Coordinates BWOA search, guarantees representation across `VISIBLE`, `NIR_RED_EDGE`, and `SWIR`, and calculates reduction metrics:
+    $$\text{Data Reduction (\%)} = \left(\frac{13 - k_{\text{selected}}}{13}\right) \times 100\%$$
+    $$\text{FLOP Savings (\%)} = \left(\frac{13 - k_{\text{selected}}}{13}\right) \times 100\%$$
 
 ### Module 3: Deep Learning, Explainability & Vector Retrieval
-- **Hybrid FusionNet:** Multimodal dual-branch neural architecture:
-  - **XNANet CNN Backbone:** Extracts 1024-dimensional spatial and local textural features.
-  - **Tiny-32 Vision Transformer (ViT):** Extracts 192-dimensional global spectral attention representations.
-  - **Feature Fusion:** Concat-linear projection creates a rich **1216-dimensional embedding** followed by a 10-class land cover head.
-- **Dynamic Spectral Slicing:** Operates transparently on variable active channel counts (e.g. 4, 6, 8, or 13 bands) dictated by the Module 2 mask.
-- **Permutation SHAP Attribution:** Quantifies per-band importance scores to verify model reliance on physical spectral signatures.
-- **FAISS Vector Index:** Fast cosine similarity indexing of 1216-dim embeddings for real-time nearest-neighbor terrain search.
+- **Hybrid FusionNet (`models/fusion_net.py`)**: Multimodal dual-branch neural architecture:
+  - **XNANet CNN Backbone (`models/cnn_backbone.py`)**: Extracts 1024-dimensional spatial and local textural features.
+  - **Tiny-32 Vision Transformer (`models/vit_transformer.py`)**: Extracts 192-dimensional global spectral attention representations.
+  - **Feature Fusion**: Concat-linear projection creates a rich **1216-dimensional embedding** followed by a 10-class land cover head.
+- **Dynamic Spectral Slicing**: Operates transparently on variable active channel counts (e.g. 4, 6, 8, or 13 bands) dictated by the Module 2 mask.
+- **Permutation SHAP Attribution (`explainability/shap_engine.py`)**: Quantifies per-band importance scores to verify model reliance on physical spectral signatures.
+- **FAISS Vector Index (`explainability/faiss_search.py`)**: Fast cosine similarity indexing of 1216-dim embeddings for real-time nearest-neighbor terrain search.
 
 ---
 
@@ -86,7 +111,7 @@ cd voxel-earth-observation
 # 2. Install PyTorch with CUDA 12.1 support
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
-# 3. Install core dependencies
+# 3. Install unified dependencies
 pip install -r requirements.txt
 ```
 

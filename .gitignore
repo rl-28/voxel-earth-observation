@@ -10,7 +10,7 @@ __pycache__/
 .coverage
 coverage.xml
 
-# Experiment results and scratch files
+# Experiment results, temporary files & logs
 results/
 scratch/
 temp/
@@ -33,10 +33,13 @@ data/evaluation/**/*.tif
 data/evaluation/**/*.tiff
 data/evaluation/**/*.jp2
 
-# Geospatial binary rasters
+# Geospatial binary rasters & data formats
 *.tif
 *.tiff
 *.jp2
+*.nc
+*.hdf
+*.hdf5
 
 # Model checkpoints & binary index artifacts
 *.pth
