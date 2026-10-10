@@ -79,6 +79,11 @@ def filter_albedo_contamination(
         glare_t = GLARE_REFLECTANCE_THRESHOLD
         shadow_t = SHADOW_REFLECTANCE_THRESHOLD
         atm_t = ATMOSPHERIC_REFLECTANCE_THRESHOLD
+        # If input tensor is in [0, 1] reflectance scale, adjust thresholds by 10000.0
+        if tensor.size > 0 and tensor.max() <= 1.0:
+            glare_t /= 10000.0
+            shadow_t /= 10000.0
+            atm_t /= 10000.0
     else:
         raise ValueError(f"Unknown input_scale: {input_scale}")
 
