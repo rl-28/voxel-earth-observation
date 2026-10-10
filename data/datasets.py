@@ -157,7 +157,7 @@ class RealSentinel2Dataset(BaseSentinel2Dataset):
         ext = os.path.splitext(full_path)[1].lower()
 
         if ext == ".npy":
-            arr = np.load(full_path)
+            arr = np.load(full_path, mmap_mode="r")
             if arr.ndim != 3:
                 raise ValueError(f"Expected 3D tile array, got {arr.ndim}D with shape {arr.shape} in {file_path}")
 
@@ -184,7 +184,7 @@ class RealSentinel2Dataset(BaseSentinel2Dataset):
         else:
             raise ValueError(f"Unsupported tile file format '{ext}' in {file_path}. Must be .npy or .tif.")
 
-        return arr.astype(np.float32)
+        return np.ascontiguousarray(arr, dtype=np.float32)
 
     def _normalize(self, arr: np.ndarray) -> np.ndarray:
         """Normalizes tile data to [0.0, 1.0]."""

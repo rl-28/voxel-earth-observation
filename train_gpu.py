@@ -159,16 +159,28 @@ def compute_class_weights(targets: np.ndarray, num_classes: int) -> Optional[tor
     return None
 
 
-def probe_dataloader_workers(num_workers: int) -> int:
+def probe_dataloader_workers(num_workers: int, dataset: Optional[Dataset] = None) -> int:
     """
-    Tests DataLoader multiprocessing worker functionality.
-    Falls back gracefully to 0 on Windows if workers fail or encounter issues.
+    Validates DataLoader multiprocessing worker functionality.
+    Falls back gracefully to 0 only if worker startup actually fails.
     """
     if num_workers <= 0:
         return 0
-    if sys.platform == "win32":
-        print(f"[INFO] Windows platform detected: Falling back from --num_workers={num_workers} to 0 for stability.")
-        return 0
+    if dataset is not None and len(dataset) > 0:
+        try:
+            probe_loader = DataLoader(
+                dataset,
+                batch_size=min(2, len(dataset)),
+                shuffle=False,
+                num_workers=num_workers,
+            )
+            # Verify multiprocessing worker startup by fetching a test batch
+            _ = next(iter(probe_loader))
+            return num_workers
+        except Exception as e:
+            print(f"[WARNING] DataLoader worker startup failed with --num_workers={num_workers}: {e}")
+            print(f"[WARNING] Falling back from --num_workers={num_workers} to 0 for stability.")
+            return 0
     return num_workers
 
 
@@ -338,8 +350,8 @@ def train_pipeline(args) -> Tuple[nn.Module, Dict[str, Any]]:
         torch.cuda.empty_cache()
 
     # 2. Datasets & Loaders
-    num_workers = probe_dataloader_workers(args.num_workers)
     train_ds, val_ds, test_ds, class_weights = setup_datasets(args)
+    num_workers = probe_dataloader_workers(args.num_workers, train_ds)
 
     train_loader = DataLoader(
         train_ds,
@@ -412,7 +424,7 @@ def train_pipeline(args) -> Tuple[nn.Module, Dict[str, Any]]:
             print(f"[WARNING] Resume checkpoint not found at {args.resume}, starting from scratch.")
 
     # Prepare results/training_log.csv
-    log_csv_path = os.path.join("results", "training_log.csv")
+    log_csv_path = args.log_path if getattr(args, "log_path", None) else os.path.join("results", "training_log.csv")
     csv_mode = "a" if (args.resume and os.path.exists(log_csv_path)) else "w"
     csv_file = open(log_csv_path, csv_mode, newline="", encoding="utf-8")
     csv_writer = csv.writer(csv_file)
@@ -561,7 +573,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size per training step")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate for AdamW")
     parser.add_argument("--weight_decay", type=float, default=1e-2, help="Weight decay for AdamW")
-    parser.add_argument("--num_workers", type=int, default=2, help="DataLoader multiprocessing workers")
+    parser.add_argument("--num_workers", type=int, default=4, help="DataLoader multiprocessing workers")
+    parser.add_argument("--log_path", type=str, default=None, help="Path to training log CSV (defaults to results/training_log.csv)")
     parser.add_argument("--grad_accum_steps", type=int, default=1, help="Gradient accumulation steps")
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint .pth to resume")
     parser.add_argument("--seed", type=int, default=42, help="Global random seed")

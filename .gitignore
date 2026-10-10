@@ -7,10 +7,14 @@ __pycache__/
 # Testing caches
 .pytest_cache/
 
-# Experiment results and datasets
+# Experiment results and scratch files
 results/
-data/
+scratch/
+
+# Dataset directories (ignore raw, processed, and synthetic datasets, keep data source package)
 data/fake_dataset/
+data/raw/
+data/processed/
 
 # PyTorch checkpoints and Vector Database artifacts
 *.pth
