@@ -26,6 +26,7 @@ logs/
 data/fake_dataset/
 data/raw/
 data/processed/
+data/cache/
 data/real_sample/
 data/india/tiles/
 data/synthetic/*.npy

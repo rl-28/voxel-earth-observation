@@ -120,15 +120,13 @@ class FusionNet(nn.Module):
 
         x_sliced = x[:, active_indices, :, :]
 
-        # Adapt channel dimension if dynamic slice differs from expected selected_channels
+        # Ensure the number of sliced active channels matches the model's configured selected_channels
         if x_sliced.shape[1] != self.selected_channels:
-            adapter = nn.Conv2d(
-                x_sliced.shape[1],
-                self.selected_channels,
-                kernel_size=1,
-                device=x.device,
+            raise ValueError(
+                f"Active mask band count ({x_sliced.shape[1]}) does not match "
+                f"FusionNet configured selected_channels ({self.selected_channels}). "
+                "FusionNet must be instantiated with selected_channels matching the active mask."
             )
-            x_sliced = adapter(x_sliced)
 
         return self.channel_adapter(x_sliced)
 

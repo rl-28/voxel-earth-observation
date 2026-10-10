@@ -1,0 +1,938 @@
+"""
+VOXEL: Task-Adaptive Earth Observation & Spectral Intelligence Pipeline
+voxel_pipeline.py - Unified Master Orchestrator
+
+Connects:
+  Stage 0: Natural Language Query Compiler & OSM Geocoder
+  Module 1: Sentinel-2 L2A Ingestion, Tiling, Wavelets & Reflectance Scaling
+  Module 2: Physics-Guided Spectral Band Optimization (BWOA) / Task Masks
+  Module 3: Hybrid CNN-ViT (FusionNet) Classification, SHAP & FAISS Retrieval
+
+Modes Supported:
+  - MODE A (Offline Smoke Test): Synthetic/fixture imagery, mock model inference,
+    strict software connectivity verification, explicitly labeled mock outputs.
+  - MODE B (Real Satellite Execution): Live geocoding, real Sentinel-2 L2A STAC
+    acquisition, radiometric processing, spectral masking, and classification
+    strictly gated on genuine trained model checkpoints (reports PARTIALLY_COMPLETE
+    with actionable guidance if genuine checkpoint is missing).
+"""
+
+import os
+import sys
+import time
+import json
+import logging
+import argparse
+from pathlib import Path
+from dataclasses import dataclass, asdict, field
+from typing import Dict, List, Optional, Tuple, Any, Union
+
+import numpy as np
+import torch
+import torch.nn as nn
+
+# Ensure Windows UTF-8 stdout
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
+        sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
+    except Exception:
+        pass
+
+# Setup logger
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger = logging.getLogger("voxel_pipeline")
+
+# VOXEL Components
+from utils.llm_parser import VoxelStageZeroParser, VoxelExecutionContract
+from module1_ingestion.pipeline import Module1Pipeline, Module1Result
+from module1_ingestion.stac_downloader import EarthSearchSTACProvider, CopernicusSTACProvider
+from module2_optimization.orchestrator import run_module2_optimization, save_band_mask
+from module2_optimization.config import (
+    TOTAL_BANDS,
+    INDEX_TO_BAND,
+    BAND_TO_INDEX,
+    BAND_NAMES,
+    DEFAULT_SCORECARD_WEIGHTS,
+)
+from models.fusion_net import FusionNet
+from explainability.shap_engine import compute_permutation_shap_attributions, plot_band_importance
+from explainability.faiss_search import query_similar_terrain
+from config.constants import (
+    NUM_BANDS,
+    NUM_CLASSES,
+    EMBEDDING_DIM,
+    LAND_COVER_CLASSES,
+    TASKS,
+    get_task_classes,
+    SENTINEL2_BAND_KEYS,
+    SENTINEL2_BANDS,
+)
+
+
+@dataclass
+class VoxelPipelineResult:
+    """
+    Structured machine-readable result contract for the VOXEL execution pipeline.
+    Suitable for CLI consumption, automated validation, and Streamlit dashboards.
+    """
+    query: str
+    execution_mode: str                         # "offline_mock" | "real_satellite"
+    status: str                                 # "COMPLETE" | "PARTIALLY_COMPLETE" | "FAILED"
+    is_synthetic: bool                          # True for mock/synthetic data
+    is_mock_prediction: bool                    # True when mock weights or synthetic data used
+    data_source: str                            # e.g., "Synthetic Deterministic Fixture (Seed: 42)"
+    resolved_location: Dict[str, Any]           # {"name": ..., "bbox": [...], "geocoder": ...}
+    contract: Dict[str, Any]                    # Stage 0 execution contract dictionary
+    task_type: str                              # "waterbody" | "forest_cover" | "general"
+    num_classes: int
+    class_list: List[str]
+    input_tensor_shape: List[int]               # e.g. [13, 256, 256]
+    selected_bands: List[str]                   # e.g. ["B01", "B03", "B04", "B06", "B8A", "B11"]
+    selected_indices: List[int]                 # e.g. [0, 2, 3, 5, 8, 11]
+    band_reduction_pct: float                   # e.g. 53.8%
+    mask_provenance: str                        # "precomputed_mask" | "live_bwoa_optimization" | "default_mask"
+    mask_path: Optional[str] = None
+    model_checkpoint: Optional[str] = None
+    model_provenance: str = "unavailable"       # "genuine_trained_model" | "mock_checkpoint" | "unavailable"
+    prediction: Optional[Dict[str, Any]] = None # {"predicted_class_id": ..., "predicted_class_name": ..., ...}
+    embedding_dim: Optional[int] = None         # 1216
+    explainability: Optional[Dict[str, Any]] = None # SHAP band attributions
+    similar_terrain: Optional[List[Dict[str, Any]]] = None # FAISS nearest neighbours
+    timing_breakdown_ms: Dict[str, float] = field(default_factory=dict)
+    diagnostics: Dict[str, Any] = field(default_factory=dict)
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializes the result contract to a standard dictionary."""
+        return asdict(self)
+
+    def save_json(self, output_path: Union[str, Path]) -> str:
+        """Saves execution result to a machine-readable JSON file."""
+        out_path = Path(output_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(self.to_dict(), f, indent=2)
+        logger.info(f"Execution result saved to: {out_path}")
+        return str(out_path)
+
+
+class VoxelPipeline:
+    """
+    Unified Master Pipeline Orchestrator connecting all VOXEL system stages:
+    Stage 0 (LLM Query Compiler & OSM Geocoding)
+      -> Module 1 (Satellite Data Preprocessing & 13-Band Radiometric Formatting)
+      -> Module 2 (Spectral Band Optimization / Task Mask Routing)
+      -> Module 3 (FusionNet CNN-ViT Classification, SHAP & FAISS Retrieval)
+    """
+
+    def __init__(
+        self,
+        default_mode: str = "offline",
+        checkpoint_dir: str = "checkpoints",
+        mask_dir: str = "checkpoints/masks",
+        device: Optional[str] = None,
+        verbose: bool = True,
+    ):
+        self.default_mode = default_mode
+        self.checkpoint_dir = Path(checkpoint_dir)
+        self.mask_dir = Path(mask_dir)
+        self.verbose = verbose
+
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = torch.device(device)
+
+        # Initialize Stage 0 Query Compiler
+        self.stage0_parser = VoxelStageZeroParser()
+
+        # STAC Providers for Real-Data Mode
+        self.earth_search_stac = EarthSearchSTACProvider()
+        self.copernicus_stac = CopernicusSTACProvider()
+
+    # -------------------------------------------------------------------------
+    # Helper: Resolve Downstream Task & Class Specifications
+    # -------------------------------------------------------------------------
+    def resolve_task_profile(
+        self, contract_task: str, user_task_override: Optional[str] = None, user_prompt: Optional[str] = None
+    ) -> Tuple[str, Optional[Path], int, List[str], bool]:
+        """
+        Maps the Stage 0 contract task to a downstream classifier profile,
+        precomputed mask path, class names, and binary flag.
+        """
+        text_to_check = f"{user_task_override or ''} {user_prompt or ''} {contract_task or ''}".upper()
+
+        if any(w in text_to_check for w in ["WATER", "MOISTURE", "INUNDATION", "FLOOD", "LAKE", "RIVER", "WETLAND"]):
+            task_key = "waterbody"
+            mask_path = self.mask_dir / "waterbody_mask.json"
+            classes = TASKS["waterbody"]["classes"]
+            return task_key, mask_path, len(classes), classes, True
+
+        elif any(w in text_to_check for w in ["FOREST", "DEFORESTATION", "CANOPY", "TREE", "WOODLAND"]):
+            task_key = "forest_cover"
+            mask_path = self.mask_dir / "forest_cover_mask.json"
+            classes = TASKS["forest_cover"]["classes"]
+            return task_key, mask_path, len(classes), classes, True
+
+        else:
+            task_key = "general"
+            mask_path = None
+            classes = list(LAND_COVER_CLASSES)
+            return task_key, mask_path, len(classes), classes, False
+
+    # -------------------------------------------------------------------------
+    # Helper: Generate Deterministic Synthetic Tile for Mode A (Offline)
+    # -------------------------------------------------------------------------
+    def generate_synthetic_tile(
+        self, task_key: str, seed: int = 42
+    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+        """
+        Generates a deterministic 13-channel (13, 256, 256) synthetic surface reflectance
+        tile scaled in [0.0, 1.0]. Faithfully mimics Sentinel-2 L2A physics by ensuring
+        the unavailable B10 channel at index 10 is zero-filled.
+        """
+        rng = np.random.default_rng(seed)
+        H, W = 256, 256
+
+        # Base reflectance across 13 bands in [0.05, 0.45]
+        tile = rng.uniform(0.05, 0.45, size=(13, H, W)).astype(np.float32)
+
+        if task_key == "waterbody":
+            # Synthesize realistic water spectral signature in central region
+            # High Blue (B02/idx 1), Green (B03/idx 2); Very Low NIR (B08/idx 7) and SWIR (B11/idx 11, B12/idx 12)
+            y, x = np.ogrid[:H, :W]
+            dist_center = np.sqrt((x - 128) ** 2 + (y - 128) ** 2)
+            water_mask = dist_center < 75.0
+
+            tile[1, water_mask] = rng.uniform(0.15, 0.25, size=np.sum(water_mask))  # B02 Blue
+            tile[2, water_mask] = rng.uniform(0.20, 0.35, size=np.sum(water_mask))  # B03 Green
+            tile[3, water_mask] = rng.uniform(0.02, 0.08, size=np.sum(water_mask))  # B04 Red
+            tile[7, water_mask] = rng.uniform(0.005, 0.03, size=np.sum(water_mask)) # B08 NIR
+            tile[11, water_mask] = rng.uniform(0.001, 0.02, size=np.sum(water_mask))# B11 SWIR1
+            tile[12, water_mask] = rng.uniform(0.001, 0.01, size=np.sum(water_mask))# B12 SWIR2
+
+        elif task_key == "forest_cover":
+            # Synthesize dense vegetation spectral signature
+            # Moderate Green, High Red-Edge / NIR (idx 7), Low SWIR
+            y, x = np.ogrid[:H, :W]
+            forest_mask = (y < 180) & (x < 200)
+            tile[3, forest_mask] = rng.uniform(0.03, 0.06, size=np.sum(forest_mask)) # B04 Red (chlorophyll absorption)
+            tile[7, forest_mask] = rng.uniform(0.45, 0.70, size=np.sum(forest_mask)) # B08 NIR (canopy scatter)
+
+        # L2A physics invariant: Cirrus Band 10 is excluded in L2A -> placeholder zero channel
+        tile[10, :, :] = 0.0
+
+        metadata = {
+            "synthetic_seed": seed,
+            "provenance": "synthetic_mock_fixture",
+            "tile_shape": list(tile.shape),
+            "dtype": str(tile.dtype),
+            "min_val": float(tile.min()),
+            "max_val": float(tile.max()),
+            "b10_placeholder": True,
+        }
+        return tile, metadata
+
+    # -------------------------------------------------------------------------
+    # Helper: Acquire Real Satellite Imagery via STAC & Process via Module 1
+    # -------------------------------------------------------------------------
+    def acquire_and_process_real_satellite_data(
+        self,
+        bbox: List[float],
+        start_date: str = "2024-01-01",
+        end_date: str = "2024-06-30",
+        cloud_cover: float = 20.0,
+        cache_dir: str = "data/cache/stac",
+    ) -> Tuple[Optional[np.ndarray], Dict[str, Any], List[str]]:
+        """
+        Acquires real Sentinel-2 Level-2A imagery for the requested BBOX using
+        public AWS Earth Search STAC, downloads bands, and executes Module 1 processing.
+        """
+        errors = []
+        min_lon, min_lat, max_lon, max_lat = bbox
+        geojson_aoi = {
+            "type": "Polygon",
+            "coordinates": [[
+                [min_lon, min_lat],
+                [max_lon, min_lat],
+                [max_lon, max_lat],
+                [min_lon, max_lat],
+                [min_lon, min_lat],
+            ]],
+        }
+
+        logger.info(f"Searching Sentinel-2 L2A STAC scenes for BBOX {bbox}...")
+        try:
+            items = self.earth_search_stac.search_sentinel2_l2a(
+                aoi=geojson_aoi,
+                start_date=start_date,
+                end_date=end_date,
+                cloud_cover=cloud_cover,
+                max_items=1,
+            )
+        except Exception as e:
+            errors.append(f"STAC search request failed: {e}")
+            return None, {}, errors
+
+        if not items:
+            errors.append(
+                f"No Sentinel-2 L2A scenes found meeting cloud cover <= {cloud_cover}% "
+                f"for BBOX {bbox} between {start_date} and {end_date}."
+            )
+            return None, {}, errors
+
+        selected_item = items[0]
+        logger.info(f"Selected STAC Item: {selected_item.id} (Cloud Cover: {selected_item.properties.get('eo:cloud_cover', 'N/A')}%)")
+
+        # Download bands to local cache directory
+        item_cache_dir = os.path.join(cache_dir, selected_item.id)
+        try:
+            band_paths = self.earth_search_stac.download_bands(
+                item=selected_item,
+                target_dir=item_cache_dir,
+                overwrite=False,
+            )
+        except Exception as e:
+            errors.append(f"Failed to download Sentinel-2 spectral bands: {e}")
+            return None, {}, errors
+
+        # Process through Module 1 Pipeline for Module 3 specification (reflectance [0, 1], 13 bands)
+        logger.info("Executing Module 1 preprocessing on downloaded scene...")
+        mod1_pipeline = Module1Pipeline.for_module3(scale_to_unit=True)
+        try:
+            results = list(mod1_pipeline.process_scene(band_paths))
+            if not results:
+                errors.append("Module 1 pipeline produced 0 valid 256x256 tiles from downloaded scene.")
+                return None, {}, errors
+
+            first_tile_res: Module1Result = results[0]
+            processed_tensor = first_tile_res.processed_tensor  # (13, 256, 256)
+            metadata = {
+                "stac_item_id": selected_item.id,
+                "stac_provider": "AWS Earth Search (Element84)",
+                "collection": selected_item.collection_id,
+                "datetime": selected_item.datetime.isoformat() if selected_item.datetime else None,
+                "cloud_cover": selected_item.properties.get("eo:cloud_cover"),
+                "tile_id": first_tile_res.tile_id,
+                "diagnostics": first_tile_res.diagnostics,
+                "total_scene_tiles": len(results),
+            }
+            return processed_tensor, metadata, []
+
+        except Exception as e:
+            errors.append(f"Module 1 tile processing failed: {e}")
+            return None, {}, errors
+
+    # -------------------------------------------------------------------------
+    # Helper: Resolve Spectral Band Mask (Strategy 1: Precomputed vs Strategy 2: BWOA)
+    # -------------------------------------------------------------------------
+    def resolve_band_mask(
+        self,
+        tensor_13_bands: np.ndarray,
+        task_key: str,
+        precomputed_mask_path: Optional[Path] = None,
+        optimize: bool = False,
+        target_band_count: Optional[int] = None,
+        scorecard_weights: Optional[Dict[str, float]] = None,
+        seed: int = 42,
+    ) -> Tuple[torch.Tensor, List[int], List[str], str, float, Optional[str], Dict[str, Any]]:
+        """
+        Resolves spectral band selection mask via either:
+        1. Precomputed task-specific mask (e.g. checkpoints/masks/waterbody_mask.json)
+        2. Live Binary Whale Optimization Algorithm (BWOA) search on the prepared tensor.
+        """
+        # Ensure tensor is channel-last for Module 2 if running BWOA
+        if tensor_13_bands.shape[0] == 13 and tensor_13_bands.shape[1] == 256:
+            tensor_channel_last = np.transpose(tensor_13_bands, (1, 2, 0))
+        else:
+            tensor_channel_last = tensor_13_bands
+
+        # Strategy 2: Live BWOA Metaheuristic Search requested
+        if optimize:
+            logger.info(f"Executing Live Module 2 BWOA Band Optimization (target_bands={target_band_count})...")
+            target_count = target_band_count or (4 if task_key == "waterbody" else 6)
+            weights = scorecard_weights or DEFAULT_SCORECARD_WEIGHTS
+
+            best_mask_arr, selected_indices, opt_metrics = run_module2_optimization(
+                input_tensor=tensor_channel_last,
+                target_count=target_count,
+                weights=weights,
+                enforce_domain_balance=True,
+                exclude_placeholder_b10=True,
+                seed=seed,
+            )
+            mask_tensor = torch.tensor(best_mask_arr, dtype=torch.float32)
+            selected_bands = [INDEX_TO_BAND[idx] for idx in selected_indices if idx in INDEX_TO_BAND]
+            data_reduction = float(((TOTAL_BANDS - len(selected_indices)) / TOTAL_BANDS) * 100.0)
+
+            return (
+                mask_tensor,
+                selected_indices,
+                selected_bands,
+                "live_bwoa_optimization",
+                data_reduction,
+                None,
+                opt_metrics,
+            )
+
+        # Strategy 1: Load precomputed task-specific mask
+        if precomputed_mask_path and precomputed_mask_path.exists():
+            logger.info(f"Loading validated precomputed task mask from: {precomputed_mask_path}")
+            with open(precomputed_mask_path, "r", encoding="utf-8") as f:
+                mask_data = json.load(f)
+
+            selected_indices = sorted(mask_data.get("selected_indices", [1, 2, 3, 7, 11, 12]))
+            # Strict safety: Enforce refusal of placeholder band B10 (index 10)
+            if 10 in selected_indices:
+                logger.warning("Placeholder band index 10 found in precomputed mask; removing index 10.")
+                selected_indices = [idx for idx in selected_indices if idx != 10]
+
+            mask_arr = np.zeros(TOTAL_BANDS, dtype=np.float32)
+            mask_arr[selected_indices] = 1.0
+            mask_tensor = torch.tensor(mask_arr, dtype=torch.float32)
+            selected_bands = [INDEX_TO_BAND[idx] for idx in selected_indices if idx in INDEX_TO_BAND]
+            data_reduction = float(((TOTAL_BANDS - len(selected_indices)) / TOTAL_BANDS) * 100.0)
+
+            diagnostics = {
+                "mask_file": str(precomputed_mask_path),
+                "method": mask_data.get("method", "BWOA"),
+                "dataset": mask_data.get("dataset", "Sentinel-2 L2A"),
+            }
+            return (
+                mask_tensor,
+                selected_indices,
+                selected_bands,
+                "precomputed_mask",
+                data_reduction,
+                str(precomputed_mask_path),
+                diagnostics,
+            )
+
+        # Fallback: Default canonical 6-band mask
+        logger.info("Using default canonical 6-band selection mask (B02, B03, B04, B08, B11, B12).")
+        default_indices = [1, 2, 3, 7, 11, 12]
+        mask_arr = np.zeros(TOTAL_BANDS, dtype=np.float32)
+        mask_arr[default_indices] = 1.0
+        mask_tensor = torch.tensor(mask_arr, dtype=torch.float32)
+        selected_bands = [INDEX_TO_BAND[idx] for idx in default_indices]
+        data_reduction = float(((TOTAL_BANDS - len(default_indices)) / TOTAL_BANDS) * 100.0)
+
+        return (
+            mask_tensor,
+            default_indices,
+            selected_bands,
+            "default_mask",
+            data_reduction,
+            None,
+            {"default_indices": default_indices},
+        )
+
+    # -------------------------------------------------------------------------
+    # Helper: Checkpoint Inspection & Model Loading
+    # -------------------------------------------------------------------------
+    def inspect_and_load_model(
+        self,
+        checkpoint_path: Optional[Union[str, Path]],
+        num_classes: int,
+        selected_channels: int,
+        is_real_mode: bool,
+    ) -> Tuple[Optional[FusionNet], str, Optional[str], List[str]]:
+        """
+        Inspects model checkpoint provenance and compatibility.
+        In Real Mode, strictly refuses mock checkpoints for final classification,
+        preserving scientific integrity.
+        """
+        warnings = []
+        if checkpoint_path is None:
+            default_ckpt = self.checkpoint_dir / "best_fusion_net.pth"
+            if default_ckpt.exists():
+                checkpoint_path = default_ckpt
+            else:
+                return None, "unavailable", None, ["No model checkpoint provided and default checkpoint not found."]
+
+        ckpt_path_obj = Path(checkpoint_path)
+        if not ckpt_path_obj.exists():
+            return None, "unavailable", str(ckpt_path_obj), [f"Model checkpoint file not found at: {ckpt_path_obj}"]
+
+        try:
+            ckpt = torch.load(ckpt_path_obj, map_location=self.device, weights_only=False)
+        except Exception as e:
+            return None, "unavailable", str(ckpt_path_obj), [f"Failed to load checkpoint file: {e}"]
+
+        config_args = ckpt.get("config_args", {})
+        metrics = ckpt.get("metrics", {})
+        is_mock_ckpt = bool(config_args.get("mock") or metrics.get("is_mock"))
+        ckpt_task = ckpt.get("task", None)
+        ckpt_num_classes = ckpt.get("num_classes", len(ckpt.get("class_list", [])) or 10)
+        ckpt_channels = ckpt.get("selected_channels", 6)
+
+        # Provenance classification
+        provenance = "mock_checkpoint" if is_mock_ckpt else "genuine_trained_model"
+
+        # Strict Gate for Real Satellite Execution Mode
+        if is_real_mode and is_mock_ckpt:
+            logger.warning(
+                f"Checkpoint at {ckpt_path_obj} is identified as a MOCK/SYNTHETIC model. "
+                "In Real Satellite Mode, inference predictions are withheld to preserve scientific integrity."
+            )
+            return None, "mock_checkpoint_withheld_for_real_mode", str(ckpt_path_obj), [
+                "Mock/synthetic checkpoint detected. Classification prediction withheld during real satellite execution.",
+                "To execute full inference, train a genuine model on real data or provide a real trained checkpoint.",
+            ]
+
+        # Check architecture head compatibility
+        active_classes = ckpt_num_classes if is_mock_ckpt else num_classes
+
+        # Instantiate FusionNet
+        model = FusionNet(
+            num_classes=active_classes,
+            total_bands=TOTAL_BANDS,
+            selected_channels=selected_channels,
+            cnn_feature_dim=1024,
+            vit_feature_dim=192,
+        ).to(self.device)
+
+        # Load weights if channel dimensions match
+        if ckpt_channels == selected_channels:
+            try:
+                model.load_state_dict(ckpt["model_state_dict"], strict=(ckpt_num_classes == active_classes))
+            except Exception as e:
+                logger.warning(f"Partial state dict mismatch when loading checkpoint: {e}")
+                warnings.append(f"Checkpoint loaded with partial weight alignment: {e}")
+        else:
+            warnings.append(
+                f"Checkpoint trained on {ckpt_channels} channels but current mask has {selected_channels} channels. "
+                "Channel-specific weights re-initialized for execution compatibility."
+            )
+
+        model.eval()
+        return model, provenance, str(ckpt_path_obj), warnings
+
+    # -------------------------------------------------------------------------
+    # Master Execution Entry Point
+    # -------------------------------------------------------------------------
+    def run(
+        self,
+        query: str,
+        mode: Optional[str] = None,
+        task_override: Optional[str] = None,
+        checkpoint_path: Optional[str] = None,
+        optimize: bool = False,
+        target_band_count: Optional[int] = None,
+        run_shap: bool = False,
+        run_faiss: bool = True,
+        output_json: Optional[str] = None,
+        synthetic_seed: int = 42,
+    ) -> VoxelPipelineResult:
+        """
+        Executes the unified end-to-end VOXEL pipeline for a natural language query.
+        """
+        start_total = time.perf_counter()
+        timing_breakdown: Dict[str, float] = {}
+        diagnostics: Dict[str, Any] = {}
+        errors: List[str] = []
+        warnings: List[str] = []
+
+        execution_mode = (mode or self.default_mode).lower()
+        if execution_mode not in ["offline", "offline_mock", "real", "real_satellite"]:
+            raise ValueError(f"Unsupported execution mode '{execution_mode}'. Choose 'offline' or 'real'.")
+
+        is_real_mode = execution_mode in ["real", "real_satellite"]
+        display_mode = "real_satellite" if is_real_mode else "offline_mock"
+
+        if self.verbose:
+            print("\n" + "=" * 78)
+            print(f"  VOXEL EARTH OBSERVATION PIPELINE — EXECUTION START")
+            print(f"  Mode: {display_mode.upper()} | Query: \"{query}\"")
+            print("=" * 78)
+
+        # ---------------------------------------------------------------------
+        # STAGE 0: Natural Language Query Compilation & Geocoding
+        # ---------------------------------------------------------------------
+        t0_start = time.perf_counter()
+        logger.info("[STAGE 0] Compiling natural language query and resolving geographic location...")
+        contract: VoxelExecutionContract = self.stage0_parser.parse(query)
+        timing_breakdown["stage_0_query_compilation_ms"] = (time.perf_counter() - t0_start) * 1000.0
+
+        resolved_location = {
+            "name": contract.location_name,
+            "bbox": contract.bbox,
+            "geocoder": contract.geocoder,
+            "llm_provider": contract.llm_provider,
+        }
+
+        task_key, precomputed_mask_path, num_classes, class_list, is_binary = self.resolve_task_profile(
+            contract.task_type, user_task_override=task_override, user_prompt=query
+        )
+        diagnostics["task_key"] = task_key
+        diagnostics["is_binary"] = is_binary
+
+        if self.verbose:
+            print(f"  [+] Stage 0 Resolved Location : {contract.location_name}")
+            print(f"  [+] Stage 0 Bounding Box     : {contract.bbox}")
+            print(f"  [+] Stage 0 Detected Task    : {task_key.upper()} ({num_classes} classes)")
+            print(f"  [+] Stage 0 LLM / Geocoder   : {contract.llm_provider} / {contract.geocoder}")
+
+        # ---------------------------------------------------------------------
+        # MODULE 1: Satellite Data Acquisition & Radiometric Preprocessing
+        # ---------------------------------------------------------------------
+        t1_start = time.perf_counter()
+        logger.info(f"[MODULE 1] Acquiring and preprocessing satellite tensor (Mode: {display_mode})...")
+
+        if is_real_mode:
+            raw_tensor, mod1_meta, mod1_errors = self.acquire_and_process_real_satellite_data(
+                bbox=contract.bbox,
+            )
+            if raw_tensor is None:
+                errors.extend(mod1_errors)
+                timing_breakdown["total_execution_ms"] = (time.perf_counter() - start_total) * 1000.0
+                return VoxelPipelineResult(
+                    query=query,
+                    execution_mode=display_mode,
+                    status="FAILED",
+                    is_synthetic=False,
+                    is_mock_prediction=False,
+                    data_source="Sentinel-2 L2A STAC Acquisition",
+                    resolved_location=resolved_location,
+                    contract=contract.to_dict(),
+                    task_type=task_key,
+                    num_classes=num_classes,
+                    class_list=class_list,
+                    input_tensor_shape=[],
+                    selected_bands=[],
+                    selected_indices=[],
+                    band_reduction_pct=0.0,
+                    mask_provenance="none",
+                    timing_breakdown_ms=timing_breakdown,
+                    diagnostics=diagnostics,
+                    errors=errors,
+                    warnings=warnings,
+                )
+            data_source_label = f"Real Sentinel-2 L2A Scene ({mod1_meta.get('stac_item_id')}) via Element84 STAC"
+            is_synthetic_flag = False
+            diagnostics["module1_metadata"] = mod1_meta
+        else:
+            raw_tensor, mod1_meta = self.generate_synthetic_tile(task_key, seed=synthetic_seed)
+            data_source_label = f"Synthetic Deterministic Surface Reflectance Tile (Seed: {synthetic_seed})"
+            is_synthetic_flag = True
+            diagnostics["module1_metadata"] = mod1_meta
+
+        timing_breakdown["module_1_ingestion_ms"] = (time.perf_counter() - t1_start) * 1000.0
+
+        # Tensor Layout Compatibility Handling: Ensure (13, 256, 256)
+        if raw_tensor.ndim == 3 and raw_tensor.shape[2] == 13:
+            tensor_channel_first = np.transpose(raw_tensor, (2, 0, 1))
+        elif raw_tensor.ndim == 3 and raw_tensor.shape[0] == 13:
+            tensor_channel_first = raw_tensor
+        else:
+            raise ValueError(f"Invalid tensor shape from Module 1: {raw_tensor.shape}")
+
+        input_shape_list = list(tensor_channel_first.shape)
+        if self.verbose:
+            print(f"  [+] Module 1 Tensor Prepared : Shape {input_shape_list} | Scale: [0.0, 1.0]")
+            print(f"  [+] Module 1 Data Source     : {data_source_label}")
+
+        # ---------------------------------------------------------------------
+        # MODULE 2: Physics-Guided Spectral Band Optimization / Task Masking
+        # ---------------------------------------------------------------------
+        t2_start = time.perf_counter()
+        logger.info("[MODULE 2] Applying task-specific spectral band selection...")
+
+        effective_target_count = target_band_count or contract.target_band_count
+        (
+            mask_tensor,
+            selected_indices,
+            selected_bands,
+            mask_prov,
+            reduction_pct,
+            used_mask_path,
+            mod2_diag,
+        ) = self.resolve_band_mask(
+            tensor_13_bands=tensor_channel_first,
+            task_key=task_key,
+            precomputed_mask_path=precomputed_mask_path,
+            optimize=optimize,
+            target_band_count=effective_target_count,
+            scorecard_weights=contract.scorecard_weights,
+            seed=synthetic_seed,
+        )
+        timing_breakdown["module_2_optimization_ms"] = (time.perf_counter() - t2_start) * 1000.0
+        diagnostics["module2_diagnostics"] = mod2_diag
+
+        if self.verbose:
+            print(f"  [+] Module 2 Mask Strategy   : {mask_prov} ({len(selected_indices)} bands: {selected_bands})")
+            print(f"  [+] Module 2 Data Reduction  : {reduction_pct:.1f}% data volume reduction")
+
+        # ---------------------------------------------------------------------
+        # MODULE 3: Hybrid CNN-ViT Classification, Explainability & Search
+        # ---------------------------------------------------------------------
+        t3_start = time.perf_counter()
+        logger.info("[MODULE 3] Loading model and executing classification inference...")
+
+        model, model_prov, active_ckpt_path, model_warnings = self.inspect_and_load_model(
+            checkpoint_path=checkpoint_path,
+            num_classes=num_classes,
+            selected_channels=len(selected_indices),
+            is_real_mode=is_real_mode,
+        )
+        warnings.extend(model_warnings)
+
+        prediction_result = None
+        embedding_np = None
+        status = "COMPLETE"
+
+        if model is None:
+            # Gated check in Real Mode or missing checkpoint
+            status = "PARTIALLY_COMPLETE"
+            logger.info("Pipeline reached PARTIALLY_COMPLETE status (preprocessing and band selection complete).")
+        else:
+            # Prepare torch tensor: (1, 13, 256, 256) on target device
+            tile_input = torch.from_numpy(tensor_channel_first).unsqueeze(0).float().to(self.device)
+            mask_device = mask_tensor.to(self.device)
+
+            with torch.no_grad():
+                logits, embedding = model(tile_input, mask=mask_device, return_embedding=True)
+                probs = torch.softmax(logits, dim=-1).squeeze(0)
+
+            pred_class_id = int(torch.argmax(probs).item())
+            active_class_list = class_list if len(class_list) == len(probs) else [f"Class_{i}" for i in range(len(probs))]
+            pred_class_name = active_class_list[pred_class_id] if 0 <= pred_class_id < len(active_class_list) else f"Class_{pred_class_id}"
+            conf_pct = float(probs[pred_class_id].item() * 100.0)
+            embedding_np = embedding.squeeze(0).cpu().numpy()
+
+            prediction_result = {
+                "predicted_class_id": pred_class_id,
+                "predicted_class_name": pred_class_name,
+                "confidence_pct": conf_pct,
+                "all_probabilities": {
+                    active_class_list[i]: float(probs[i].item() * 100.0)
+                    for i in range(len(active_class_list))
+                },
+                "provenance": "synthetic_mock_prediction" if is_synthetic_flag or model_prov == "mock_checkpoint" else "real_inference",
+            }
+            if self.verbose:
+                print(f"  [+] Module 3 Prediction      : {pred_class_name} (Confidence: {conf_pct:.2f}%)")
+                print(f"  [+] Module 3 Embedding       : Shape ({embedding_np.shape[0]},) [1216-dim representation]")
+
+        timing_breakdown["module_3_inference_ms"] = (time.perf_counter() - t3_start) * 1000.0
+
+        # ---------------------------------------------------------------------
+        # Optional: Explainability (SHAP Attributions)
+        # ---------------------------------------------------------------------
+        explainability_result = None
+        if run_shap and model is not None:
+            t_shap = time.perf_counter()
+            logger.info("Computing Permutation SHAP channel attributions across active bands...")
+            try:
+                shap_attributions = compute_permutation_shap_attributions(
+                    model=model,
+                    sample_images=tile_input,
+                    mask=mask_device,
+                    num_permutations=5,
+                    device=str(self.device),
+                )
+                explainability_result = {
+                    "channel_attributions": shap_attributions,
+                    "top_contributing_bands": sorted(
+                        shap_attributions.values(),
+                        key=lambda x: x.get("percentage", 0),
+                        reverse=True
+                    ),
+                }
+                if self.verbose:
+                    top_b = explainability_result["top_contributing_bands"][0]
+                    print(f"  [+] SHAP Top Spectral Band   : {top_b['name']} ({top_b['percentage']:.1f}% relative impact)")
+            except Exception as e:
+                warnings.append(f"SHAP attribution computation failed: {e}")
+            timing_breakdown["shap_explainability_ms"] = (time.perf_counter() - t_shap) * 1000.0
+
+        # ---------------------------------------------------------------------
+        # Optional: Vector Retrieval (FAISS Nearest Terrain Neighbors)
+        # ---------------------------------------------------------------------
+        similar_terrain_results = None
+        if run_faiss and embedding_np is not None:
+            t_faiss = time.perf_counter()
+            faiss_index_file = self.checkpoint_dir / "terrain_index.faiss"
+            if faiss_index_file.exists():
+                try:
+                    scores, indices, metadata, latency_ms = query_similar_terrain(
+                        query_embedding=embedding_np,
+                        top_k=5,
+                        index_path=str(faiss_index_file),
+                    )
+                    similar_terrain_results = []
+                    for rank, (s, idx, meta) in enumerate(zip(scores, indices, metadata), 1):
+                        retrieved_class_id = meta.get("true_class", -1)
+                        retrieved_class_name = (
+                            LAND_COVER_CLASSES[retrieved_class_id]
+                            if 0 <= retrieved_class_id < len(LAND_COVER_CLASSES)
+                            else "N/A"
+                        )
+                        similar_terrain_results.append({
+                            "rank": rank,
+                            "similarity_score": float(s),
+                            "index": int(idx),
+                            "tile_id": meta.get("tile_id", f"TILE_{idx}"),
+                            "split": meta.get("split", "unknown"),
+                            "class_id": retrieved_class_id,
+                            "class_name": retrieved_class_name,
+                        })
+                    diagnostics["faiss_retrieval_latency_ms"] = latency_ms
+                    if self.verbose and similar_terrain_results:
+                        print(f"  [+] FAISS Nearest Neighbor   : {similar_terrain_results[0]['tile_id']} ({similar_terrain_results[0]['class_name']}, sim={similar_terrain_results[0]['similarity_score']:.4f})")
+                except Exception as e:
+                    warnings.append(f"FAISS nearest neighbor retrieval failed: {e}")
+            else:
+                diagnostics["faiss_index_status"] = "Index file not found; skipping retrieval."
+            timing_breakdown["faiss_retrieval_ms"] = (time.perf_counter() - t_faiss) * 1000.0
+
+        # Total timing
+        timing_breakdown["total_pipeline_latency_ms"] = (time.perf_counter() - start_total) * 1000.0
+
+        # Build final structured result object
+        is_mock_pred = bool(is_synthetic_flag or model_prov.startswith("mock") or prediction_result is None)
+
+        result_obj = VoxelPipelineResult(
+            query=query,
+            execution_mode=display_mode,
+            status=status,
+            is_synthetic=is_synthetic_flag,
+            is_mock_prediction=is_mock_pred,
+            data_source=data_source_label,
+            resolved_location=resolved_location,
+            contract=contract.to_dict(),
+            task_type=task_key,
+            num_classes=num_classes,
+            class_list=class_list,
+            input_tensor_shape=input_shape_list,
+            selected_bands=selected_bands,
+            selected_indices=selected_indices,
+            band_reduction_pct=reduction_pct,
+            mask_provenance=mask_prov,
+            mask_path=used_mask_path,
+            model_checkpoint=active_ckpt_path,
+            model_provenance=model_prov,
+            prediction=prediction_result,
+            embedding_dim=EMBEDDING_DIM if embedding_np is not None else None,
+            explainability=explainability_result,
+            similar_terrain=similar_terrain_results,
+            timing_breakdown_ms=timing_breakdown,
+            diagnostics=diagnostics,
+            errors=errors,
+            warnings=warnings,
+        )
+
+        if output_json:
+            result_obj.save_json(output_json)
+
+        if self.verbose:
+            print("-" * 78)
+            print(f"  PIPELINE STATUS : {status}")
+            print(f"  TOTAL LATENCY   : {timing_breakdown['total_pipeline_latency_ms']:.2f} ms")
+            if warnings:
+                print(f"  WARNINGS        : {len(warnings)} reported")
+            if errors:
+                print(f"  ERRORS          : {len(errors)} reported")
+            print("=" * 78 + "\n")
+
+        return result_obj
+
+
+# -----------------------------------------------------------------------------
+# Command Line Interface (CLI) Entry Point
+# -----------------------------------------------------------------------------
+def build_cli_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="VOXEL Unified Earth Observation & Spectral Intelligence Pipeline",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "query",
+        type=str,
+        nargs="?",
+        default="Identify water bodies around Chilika Lake, Odisha, India",
+        help="Natural language remote sensing query or task objective.",
+    )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["offline", "real"],
+        default="offline",
+        help="Execution mode: 'offline' for synthetic smoke test; 'real' for live satellite acquisition.",
+    )
+    parser.add_argument(
+        "--task",
+        type=str,
+        default=None,
+        help="Explicit task override (e.g. waterbody, forest_cover, general).",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Path to trained FusionNet PyTorch checkpoint (.pth).",
+    )
+    parser.add_argument(
+        "--optimize",
+        action="store_true",
+        help="Execute live Module 2 BWOA metaheuristic optimization instead of precomputed task mask.",
+    )
+    parser.add_argument(
+        "--target-bands",
+        type=int,
+        default=None,
+        help="Target spectral band budget for BWOA optimization (e.g. 4, 5, 6).",
+    )
+    parser.add_argument(
+        "--shap",
+        action="store_true",
+        help="Compute Permutation SHAP spectral band attributions.",
+    )
+    parser.add_argument(
+        "--no-faiss",
+        action="store_true",
+        help="Disable FAISS vector database nearest-neighbor terrain search.",
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        default=None,
+        help="Destination JSON file path to persist structured pipeline results.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for deterministic offline reproducibility.",
+    )
+    return parser
+
+
+def main():
+    parser = build_cli_parser()
+    args = parser.parse_args()
+
+    pipeline = VoxelPipeline(default_mode=args.mode)
+    result = pipeline.run(
+        query=args.query,
+        mode=args.mode,
+        task_override=args.task,
+        checkpoint_path=args.checkpoint,
+        optimize=args.optimize,
+        target_band_count=args.target_bands,
+        run_shap=args.shap,
+        run_faiss=not args.no_faiss,
+        output_json=args.output,
+        synthetic_seed=args.seed,
+    )
+    return 0 if result.status in ["COMPLETE", "PARTIALLY_COMPLETE"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
