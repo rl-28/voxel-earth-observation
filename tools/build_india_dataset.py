@@ -479,8 +479,8 @@ def derive_binary_labels_and_splits(
     - Val AOI (holdout 1 AOI): 'sardar_sarovar' (Water-rich)
     - Train AOIs: 'western_ghats', 'kaziranga', 'chilika', 'punjab', 'thar', 'mumbai'
     """
-    test_aois = ["kanha", "hirakud"]
-    val_aois = ["sardar_sarovar"]
+    test_aois = ["hirakud"]
+    val_aois = ["chilika", "kanha"]
 
     def get_split(aoi):
         if aoi in test_aois:

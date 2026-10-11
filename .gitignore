@@ -29,7 +29,8 @@ data/processed/
 data/cache/
 data/real_sample/
 data/india/tiles/
-data/synthetic/*.npy
+data/tasks/**/tiles/
+*.npy
 data/synthetic/metadata.json
 data/evaluation/**/*.npy
 data/evaluation/**/*.tif

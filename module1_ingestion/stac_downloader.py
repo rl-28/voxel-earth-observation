@@ -260,6 +260,7 @@ class EarthSearchSTACProvider(STACProvider):
         item: Any,
         target_dir: str,
         bands: Optional[List[str]] = None,
+        bbox: Optional[List[float]] = None,
         overwrite: bool = False
     ) -> Dict[str, str]:
         requested_bands = bands or SENTINEL_2_L2A_SPECTRAL_BANDS
@@ -275,6 +276,65 @@ class EarthSearchSTACProvider(STACProvider):
                 )
             asset_url = item.assets[asset_key].href
             dest_path = os.path.join(target_dir, f"{band_name}.tif")
+
+            if os.path.exists(dest_path) and not overwrite and os.path.getsize(dest_path) > 1000:
+                band_paths[band_name] = dest_path
+                continue
+
+            if bbox is not None:
+                try:
+                    import rasterio
+                    from rasterio.windows import Window, from_bounds
+                    from rasterio.warp import transform_bounds
+
+                    min_px = 260 if band_name in ["B02", "B03", "B04", "B08"] else (130 if band_name in ["B05", "B06", "B07", "B8A", "B11", "B12"] else 45)
+
+                    # Check if valid cached crop exists and meets minimum required spatial resolution
+                    if os.path.exists(dest_path) and not overwrite and os.path.getsize(dest_path) > 1000:
+                        try:
+                            with rasterio.open(dest_path) as chk:
+                                if chk.width >= min_px and chk.height >= min_px:
+                                    band_paths[band_name] = dest_path
+                                    continue
+                        except Exception:
+                            pass
+
+                    with rasterio.Env(GDAL_HTTP_TIMEOUT=120, GDAL_HTTP_MAX_RETRY=3, GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR"):
+                        with rasterio.open(asset_url) as src:
+                            tb = transform_bounds("EPSG:4326", src.crs, *bbox)
+                            win = from_bounds(*tb, transform=src.transform).round_offsets().round_lengths()
+                            col_off = max(0, min(src.width - 1, int(win.col_off)))
+                            row_off = max(0, min(src.height - 1, int(win.row_off)))
+                            width = max(1, min(src.width - col_off, int(win.width)))
+                            height = max(1, min(src.height - row_off, int(win.height)))
+
+                            # Guarantee window spans at least min_px pixels so 256x256 tiling succeeds
+                            if width < min_px and src.width >= min_px:
+                                extra_w = min_px - width
+                                col_off = max(0, col_off - extra_w // 2)
+                                width = min(src.width - col_off, min_px)
+                            if height < min_px and src.height >= min_px:
+                                extra_h = min_px - height
+                                row_off = max(0, row_off - extra_h // 2)
+                                height = min(src.height - row_off, min_px)
+
+                            clamped_win = Window(col_off, row_off, width, height)
+
+                            arr = src.read(1, window=clamped_win)
+                            win_transform = rasterio.windows.transform(clamped_win, src.transform)
+                            profile = src.profile.copy()
+                            profile.update({
+                                "height": height,
+                                "width": width,
+                                "transform": win_transform,
+                            })
+                            with rasterio.open(dest_path, "w", **profile) as dst:
+                                dst.write(arr, 1)
+                    band_paths[band_name] = dest_path
+                    continue
+                except Exception as e:
+                    logger.warning(f"Windowed COG read failed for {band_name}, falling back to full download: {e}")
+
             downloaded = self.download_asset(asset_url, dest_path, overwrite=overwrite)
             band_paths[band_name] = downloaded
 

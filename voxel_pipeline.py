@@ -289,12 +289,33 @@ class VoxelPipeline:
         selected_item = items[0]
         logger.info(f"Selected STAC Item: {selected_item.id} (Cloud Cover: {selected_item.properties.get('eo:cloud_cover', 'N/A')}%)")
 
-        # Download bands to local cache directory
+        # Ensure download BBOX is sufficiently buffered to yield at least 256x256 pixels
+        c_lon = (min_lon + max_lon) / 2.0
+        c_lat = (min_lat + max_lat) / 2.0
+        half_span_lon = max((max_lon - min_lon) / 2.0, 0.016)
+        half_span_lat = max((max_lat - min_lat) / 2.0, 0.016)
+        buffered_bbox = [
+            round(c_lon - half_span_lon, 4),
+            round(c_lat - half_span_lat, 4),
+            round(c_lon + half_span_lon, 4),
+            round(c_lat + half_span_lat, 4),
+        ]
+
+        # Check if scene was previously cached locally
         item_cache_dir = os.path.join(cache_dir, selected_item.id)
+        is_already_cached = (
+            os.path.exists(item_cache_dir)
+            and any(
+                f.endswith(".tif") and os.path.getsize(os.path.join(item_cache_dir, f)) > 1000
+                for f in os.listdir(item_cache_dir)
+            )
+        )
+
         try:
             band_paths = self.earth_search_stac.download_bands(
                 item=selected_item,
                 target_dir=item_cache_dir,
+                bbox=buffered_bbox,
                 overwrite=False,
             )
         except Exception as e:
@@ -303,7 +324,7 @@ class VoxelPipeline:
 
         # Process through Module 1 Pipeline for Module 3 specification (reflectance [0, 1], 13 bands)
         logger.info("Executing Module 1 preprocessing on downloaded scene...")
-        mod1_pipeline = Module1Pipeline.for_module3(scale_to_unit=True)
+        mod1_pipeline = Module1Pipeline.for_module3()
         try:
             results = list(mod1_pipeline.process_scene(band_paths))
             if not results:
@@ -321,6 +342,8 @@ class VoxelPipeline:
                 "tile_id": first_tile_res.tile_id,
                 "diagnostics": first_tile_res.diagnostics,
                 "total_scene_tiles": len(results),
+                "is_cached": is_already_cached,
+                "cache_status": "Cached on Disk (Zero Network IO)" if is_already_cached else "Newly Acquired via STAC COG",
             }
             return processed_tensor, metadata, []
 
@@ -441,6 +464,7 @@ class VoxelPipeline:
         num_classes: int,
         selected_channels: int,
         is_real_mode: bool,
+        task_key: Optional[str] = None,
     ) -> Tuple[Optional[FusionNet], str, Optional[str], List[str]]:
         """
         Inspects model checkpoint provenance and compatibility.
@@ -449,11 +473,22 @@ class VoxelPipeline:
         """
         warnings = []
         if checkpoint_path is None:
-            default_ckpt = self.checkpoint_dir / "best_fusion_net.pth"
-            if default_ckpt.exists():
-                checkpoint_path = default_ckpt
-            else:
-                return None, "unavailable", None, ["No model checkpoint provided and default checkpoint not found."]
+            # Check for real task-specific checkpoint first
+            if task_key:
+                real_ckpt = self.checkpoint_dir / f"real_{task_key}" / "best_fusion_net.pth"
+                if real_ckpt.exists():
+                    checkpoint_path = real_ckpt
+            # Check for generic task-specific checkpoint next
+            if checkpoint_path is None and task_key:
+                task_ckpt = self.checkpoint_dir / task_key / "best_fusion_net.pth"
+                if task_ckpt.exists():
+                    checkpoint_path = task_ckpt
+            if checkpoint_path is None:
+                default_ckpt = self.checkpoint_dir / "best_fusion_net.pth"
+                if default_ckpt.exists():
+                    checkpoint_path = default_ckpt
+                else:
+                    return None, "unavailable", None, ["No model checkpoint provided and default checkpoint not found."]
 
         ckpt_path_obj = Path(checkpoint_path)
         if not ckpt_path_obj.exists():
@@ -528,10 +563,17 @@ class VoxelPipeline:
         run_faiss: bool = True,
         output_json: Optional[str] = None,
         synthetic_seed: int = 42,
+        **kwargs,
     ) -> VoxelPipelineResult:
         """
         Executes the unified end-to-end VOXEL pipeline for a natural language query.
         """
+        # Support common aliases
+        if "explain_shap" in kwargs:
+            run_shap = kwargs["explain_shap"]
+        if "optimize_bands" in kwargs:
+            optimize = kwargs["optimize_bands"]
+
         start_total = time.perf_counter()
         timing_breakdown: Dict[str, float] = {}
         diagnostics: Dict[str, Any] = {}
@@ -613,9 +655,11 @@ class VoxelPipeline:
                     errors=errors,
                     warnings=warnings,
                 )
-            data_source_label = f"Real Sentinel-2 L2A Scene ({mod1_meta.get('stac_item_id')}) via Element84 STAC"
+            cache_tag = f" [{mod1_meta.get('cache_status', 'Live')}]"
+            data_source_label = f"Real Sentinel-2 L2A Scene ({mod1_meta.get('stac_item_id')}){cache_tag} via Element84 STAC"
             is_synthetic_flag = False
             diagnostics["module1_metadata"] = mod1_meta
+            diagnostics["cache_status"] = mod1_meta.get("cache_status", "Unknown")
         else:
             raw_tensor, mod1_meta = self.generate_synthetic_tile(task_key, seed=synthetic_seed)
             data_source_label = f"Synthetic Deterministic Surface Reflectance Tile (Seed: {synthetic_seed})"
@@ -636,6 +680,26 @@ class VoxelPipeline:
         if self.verbose:
             print(f"  [+] Module 1 Tensor Prepared : Shape {input_shape_list} | Scale: [0.0, 1.0]")
             print(f"  [+] Module 1 Data Source     : {data_source_label}")
+
+        # Generate and save RGB preview composite (B04: Red, B03: Green, B02: Blue)
+        try:
+            r = tensor_channel_first[3]  # B04
+            g = tensor_channel_first[2]  # B03
+            b = tensor_channel_first[1]  # B02
+            rgb = np.stack([r, g, b], axis=-1)
+            p2, p98 = np.percentile(rgb, (2, 98))
+            if p98 > p2:
+                rgb_scaled = np.clip((rgb - p2) / (p98 - p2), 0.0, 1.0)
+            else:
+                rgb_scaled = np.clip(rgb, 0.0, 1.0)
+            
+            rgb_preview_path = Path("results/latest_inference_rgb.png")
+            rgb_preview_path.parent.mkdir(parents=True, exist_ok=True)
+            import matplotlib.image as mpimg
+            mpimg.imsave(rgb_preview_path, rgb_scaled)
+            diagnostics["rgb_preview_path"] = str(rgb_preview_path)
+        except Exception as e:
+            logger.debug(f"RGB preview generation skipped: {e}")
 
         # ---------------------------------------------------------------------
         # MODULE 2: Physics-Guided Spectral Band Optimization / Task Masking
@@ -679,6 +743,7 @@ class VoxelPipeline:
             num_classes=num_classes,
             selected_channels=len(selected_indices),
             is_real_mode=is_real_mode,
+            task_key=task_key,
         )
         warnings.extend(model_warnings)
 

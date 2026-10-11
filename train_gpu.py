@@ -316,8 +316,21 @@ def setup_datasets(args) -> Tuple[Dataset, Dataset, Optional[Dataset], Optional[
         print(f"  Split indices saved to: {splits_save_path}")
 
         # Compute class weights for training split
-        train_labels = train_ds.records["label"].values
-        class_weights = compute_class_weights(train_labels, num_classes=num_classes)
+        train_raw_labels = train_ds.records["label"].values
+        train_int_labels = []
+        for l in train_raw_labels:
+            try:
+                train_int_labels.append(int(l))
+            except ValueError:
+                str_l = str(l).strip()
+                if str_l in class_list:
+                    train_int_labels.append(class_list.index(str_l))
+                elif str_l in LAND_COVER_CLASSES:
+                    train_int_labels.append(LAND_COVER_CLASSES.index(str_l))
+                else:
+                    train_int_labels.append(0)
+        train_int_labels = np.array(train_int_labels, dtype=np.int64)
+        class_weights = compute_class_weights(train_int_labels, num_classes=num_classes)
         return train_ds, val_ds, test_ds, class_weights
 
     # Fallback to mock dataset

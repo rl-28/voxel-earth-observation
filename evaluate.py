@@ -7,6 +7,7 @@ and saves a confusion matrix visualization to results/confusion_matrix.png.
 
 import os
 import sys
+import json
 import argparse
 from typing import Dict, List, Optional, Tuple, Any
 
@@ -19,6 +20,7 @@ from sklearn.metrics import (
     f1_score,
     jaccard_score,
     precision_recall_fscore_support,
+    balanced_accuracy_score,
 )
 import matplotlib
 matplotlib.use("Agg")
@@ -186,6 +188,14 @@ def evaluate_model(
     oa = float(np.mean(preds_np == targets_np) * 100.0) if len(targets_np) > 0 else 0.0
     macro_f1 = float(f1_score(targets_np, preds_np, average="macro", zero_division=0) * 100.0)
     miou = float(jaccard_score(targets_np, preds_np, average="macro", zero_division=0) * 100.0)
+    balanced_acc = float(balanced_accuracy_score(targets_np, preds_np) * 100.0) if len(targets_np) > 0 else 0.0
+
+    # Majority Class Baseline
+    majority_class_id = int(np.bincount(targets_np).argmax()) if len(targets_np) > 0 else 0
+    majority_class_name = class_list[majority_class_id] if majority_class_id < len(class_list) else str(majority_class_id)
+    majority_preds = np.full_like(targets_np, majority_class_id)
+    baseline_oa = float(np.mean(majority_preds == targets_np) * 100.0) if len(targets_np) > 0 else 0.0
+    baseline_f1 = float(f1_score(targets_np, majority_preds, average="macro", zero_division=0) * 100.0)
 
     # Per-Class Precision, Recall, F1
     precisions, recalls, f1s, supports = precision_recall_fscore_support(
@@ -198,9 +208,11 @@ def evaluate_model(
     plot_and_save_confusion_matrix(cm, class_list, output_path=cm_path)
 
     print("-" * 80)
-    print(f"Overall Accuracy (OA):     {oa:.2f}%")
-    print(f"Macro F1-Score:            {macro_f1:.2f}%")
-    print(f"Mean IoU (mIoU):           {miou:.2f}%")
+    print(f"Overall Accuracy (OA):       {oa:.2f}%")
+    print(f"Balanced Accuracy:           {balanced_acc:.2f}%")
+    print(f"Macro F1-Score:              {macro_f1:.2f}%")
+    print(f"Mean IoU (mIoU):             {miou:.2f}%")
+    print(f"Majority-Class Baseline:     {baseline_oa:.2f}% OA | {baseline_f1:.2f}% F1 (Always '{majority_class_name}')")
     print("-" * 80)
     print(f"{'Class ID':<9} | {'Class Name':<28} | {'Precision(%)':<13} | {'Recall(%)':<11} | {'F1(%)':<9} | {'Support'}")
     print("-" * 80)
@@ -215,10 +227,14 @@ def evaluate_model(
     print(" [STATUS] Test evaluation completed successfully!")
     print("=" * 80)
 
-    return {
+    metrics_summary = {
         "oa": oa,
+        "balanced_accuracy": balanced_acc,
         "macro_f1": macro_f1,
         "miou": miou,
+        "majority_baseline_oa": baseline_oa,
+        "majority_baseline_f1": baseline_f1,
+        "majority_class": majority_class_name,
         "per_class": {
             class_list[c]: {
                 "precision": float(precisions[c]),
@@ -231,6 +247,16 @@ def evaluate_model(
         "confusion_matrix": cm.tolist(),
         "confusion_matrix_path": cm_path,
     }
+
+    metrics_json_path = os.path.join(output_dir, "evaluation_metrics.json")
+    try:
+        with open(metrics_json_path, "w") as f:
+            json.dump(metrics_summary, f, indent=2)
+        print(f" [EVAL] Evaluation metrics saved to: {metrics_json_path}")
+    except Exception as e:
+        print(f" [WARN] Failed to write evaluation metrics json: {e}")
+
+    return metrics_summary
 
 
 def parse_args():
