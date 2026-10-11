@@ -96,6 +96,8 @@ class VoxelPipelineResult:
     band_reduction_pct: float                   # e.g. 53.8%
     mask_provenance: str                        # "precomputed_mask" | "live_bwoa_optimization" | "default_mask"
     mask_path: Optional[str] = None
+    candidate_bwoa_bands: Optional[List[str]] = None
+    mask_compatibility_note: Optional[str] = None
     model_checkpoint: Optional[str] = None
     model_provenance: str = "unavailable"       # "genuine_trained_model" | "mock_checkpoint" | "unavailable"
     prediction: Optional[Dict[str, Any]] = None # {"predicted_class_id": ..., "predicted_class_name": ..., ...}
@@ -465,11 +467,12 @@ class VoxelPipeline:
         selected_channels: int,
         is_real_mode: bool,
         task_key: Optional[str] = None,
+        selected_indices: Optional[List[int]] = None,
     ) -> Tuple[Optional[FusionNet], str, Optional[str], List[str]]:
         """
         Inspects model checkpoint provenance and compatibility.
         In Real Mode, strictly refuses mock checkpoints for final classification,
-        preserving scientific integrity.
+        and verifies that active spectral channels match checkpoint training configuration.
         """
         warnings = []
         if checkpoint_path is None:
@@ -520,6 +523,36 @@ class VoxelPipeline:
                 "To execute full inference, train a genuine model on real data or provide a real trained checkpoint.",
             ]
 
+        # Verify spectral channel count compatibility in Real Satellite Mode
+        if ckpt_channels != selected_channels:
+            if is_real_mode and not is_mock_ckpt:
+                logger.warning(
+                    f"Spectral channel count mismatch: Checkpoint expects {ckpt_channels} channels but current mask has {selected_channels}. "
+                    "Classification inference withheld to prevent running uncalibrated weights."
+                )
+                return None, "channel_count_mismatch_gated", str(ckpt_path_obj), [
+                    f"Selected spectral mask has {selected_channels} channels, but calibrated model '{task_key or 'default'}' was trained on {ckpt_channels} channels.",
+                    "Classification inference is safely gated to prevent running untrained weights on real satellite data. To execute classification, use the calibrated task profile.",
+                ]
+            else:
+                warnings.append(
+                    f"Checkpoint trained on {ckpt_channels} channels but current mask has {selected_channels} channels. "
+                    "Channel-specific weights re-initialized for execution compatibility."
+                )
+
+        # Verify spectral band identity compatibility in Real Satellite Mode
+        ckpt_band_mask = ckpt.get("band_mask")
+        if is_real_mode and not is_mock_ckpt and ckpt_band_mask is not None and selected_indices is not None:
+            ckpt_idx_list = [i for i, v in enumerate(ckpt_band_mask) if (v == 1 if isinstance(v, (int, float)) else bool(v))]
+            if sorted(ckpt_idx_list) != sorted(selected_indices):
+                logger.warning(
+                    f"Spectral channel identity mismatch: candidate mask ({selected_indices}) differs from checkpoint bands ({ckpt_idx_list})."
+                )
+                return None, "band_selection_mismatch_gated", str(ckpt_path_obj), [
+                    f"Candidate mask bands {selected_indices} differ from calibrated model training bands {ckpt_idx_list}.",
+                    "Classification inference is safely gated to prevent passing out-of-distribution spectral combinations into real model weights. To execute classification, use the calibrated task profile.",
+                ]
+
         # Check architecture head compatibility
         active_classes = ckpt_num_classes if is_mock_ckpt else num_classes
 
@@ -539,11 +572,6 @@ class VoxelPipeline:
             except Exception as e:
                 logger.warning(f"Partial state dict mismatch when loading checkpoint: {e}")
                 warnings.append(f"Checkpoint loaded with partial weight alignment: {e}")
-        else:
-            warnings.append(
-                f"Checkpoint trained on {ckpt_channels} channels but current mask has {selected_channels} channels. "
-                "Channel-specific weights re-initialized for execution compatibility."
-            )
 
         model.eval()
         return model, provenance, str(ckpt_path_obj), warnings
@@ -613,6 +641,25 @@ class VoxelPipeline:
         )
         diagnostics["task_key"] = task_key
         diagnostics["is_binary"] = is_binary
+
+        # Task Scope and Scientific Qualification
+        qualification_notes = []
+        q_upper = query.upper()
+        if any(w in q_upper for w in ["LEVEL", "DEPTH", "VOLUME", "CAPACITY", "FLUCTUATION"]):
+            qualification_notes.append(
+                "Scientific Scope Notice: Pipeline performs whole-tile land-cover classification (Water vs Non-water at 256×256 px footprint). It does NOT quantify temporal water level/depth fluctuations or volumetric reservoir capacity."
+            )
+        if any(w in q_upper for w in ["CANOPY", "DENSITY", "TREE COVER PERCENTAGE", "TREE COUNT"]):
+            qualification_notes.append(
+                "Scientific Scope Notice: Pipeline performs whole-tile binary forest-cover presence classification (Forest vs Non-forest). It does NOT produce continuous canopy density percentages or pixel-level segmentation."
+            )
+        if any(w in q_upper for w in ["CROP", "AGRICULTURE", "HARVEST", "YIELD"]):
+            qualification_notes.append(
+                "Scientific Scope Notice: Crop health task profile routes to multi-spectral reference models. Dedicated real-data Indian models currently exist for Waterbody and Forest Cover tasks."
+            )
+        if qualification_notes:
+            diagnostics["task_qualifications"] = qualification_notes
+            warnings.extend(qualification_notes)
 
         if self.verbose:
             print(f"  [+] Stage 0 Resolved Location : {contract.location_name}")
@@ -733,6 +780,58 @@ class VoxelPipeline:
             print(f"  [+] Module 2 Data Reduction  : {reduction_pct:.1f}% data volume reduction")
 
         # ---------------------------------------------------------------------
+        # Scientific Decoupling & Mask Compatibility Verification
+        # ---------------------------------------------------------------------
+        candidate_bwoa_bands = None
+        candidate_bwoa_indices = None
+        mask_compatibility_note = None
+        inference_indices = selected_indices
+        inference_bands = selected_bands
+        inference_mask_tensor = mask_tensor
+
+        target_ckpt = checkpoint_path
+        if target_ckpt is None and task_key:
+            real_ckpt = self.checkpoint_dir / f"real_{task_key}" / "best_fusion_net.pth"
+            if real_ckpt.exists():
+                target_ckpt = real_ckpt
+
+        if target_ckpt and Path(target_ckpt).exists():
+            try:
+                ckpt_meta = torch.load(Path(target_ckpt), map_location="cpu", weights_only=False)
+                ckpt_mask_raw = ckpt_meta.get("band_mask")
+                if ckpt_mask_raw is not None:
+                    ckpt_trained_indices = [
+                        i for i, v in enumerate(ckpt_mask_raw)
+                        if (v == 1 if isinstance(v, (int, float)) else bool(v))
+                    ]
+                    if sorted(selected_indices) != sorted(ckpt_trained_indices):
+                        # Candidate BWOA mask differs from verified checkpoint training mask
+                        candidate_bwoa_bands = list(selected_bands)
+                        candidate_bwoa_indices = list(selected_indices)
+                        diagnostics["live_bwoa_candidate_mask"] = {
+                            "selected_indices": candidate_bwoa_indices,
+                            "selected_bands": candidate_bwoa_bands,
+                            "reduction_pct": reduction_pct,
+                            "optimization_metrics": mod2_diag,
+                        }
+                        # Decouple for inference to preserve model validity
+                        inference_indices = ckpt_trained_indices
+                        inference_bands = [INDEX_TO_BAND[i] for i in ckpt_trained_indices if i in INDEX_TO_BAND]
+                        inf_mask_arr = np.zeros(TOTAL_BANDS, dtype=np.float32)
+                        inf_mask_arr[inference_indices] = 1.0
+                        inference_mask_tensor = torch.tensor(inf_mask_arr, dtype=torch.float32)
+
+                        mask_compatibility_note = (
+                            f"Scientific Decoupling Notice: Fresh BWOA optimization produced candidate mask {candidate_bwoa_bands} ({len(candidate_bwoa_bands)} channels, {reduction_pct:.1f}% volume reduction). "
+                            f"Because this candidate mask differs from the calibrated model's verified training mask {inference_bands} ({len(inference_bands)} channels), "
+                            f"classification inference was executed using the verified training mask to avoid feeding uncalibrated spectral combinations into trained weights."
+                        )
+                        warnings.append("Live BWOA candidate mask is decoupled from classification inference to preserve model validity.")
+                        mask_prov = "live_bwoa_candidate_decoupled"
+            except Exception as e:
+                logger.debug(f"Pre-check of checkpoint mask failed: {e}")
+
+        # ---------------------------------------------------------------------
         # MODULE 3: Hybrid CNN-ViT Classification, Explainability & Search
         # ---------------------------------------------------------------------
         t3_start = time.perf_counter()
@@ -741,9 +840,10 @@ class VoxelPipeline:
         model, model_prov, active_ckpt_path, model_warnings = self.inspect_and_load_model(
             checkpoint_path=checkpoint_path,
             num_classes=num_classes,
-            selected_channels=len(selected_indices),
+            selected_channels=len(inference_indices),
             is_real_mode=is_real_mode,
             task_key=task_key,
+            selected_indices=inference_indices,
         )
         warnings.extend(model_warnings)
 
@@ -758,7 +858,7 @@ class VoxelPipeline:
         else:
             # Prepare torch tensor: (1, 13, 256, 256) on target device
             tile_input = torch.from_numpy(tensor_channel_first).unsqueeze(0).float().to(self.device)
-            mask_device = mask_tensor.to(self.device)
+            mask_device = inference_mask_tensor.to(self.device)
 
             with torch.no_grad():
                 logits, embedding = model(tile_input, mask=mask_device, return_embedding=True)
@@ -875,11 +975,13 @@ class VoxelPipeline:
             num_classes=num_classes,
             class_list=class_list,
             input_tensor_shape=input_shape_list,
-            selected_bands=selected_bands,
-            selected_indices=selected_indices,
+            selected_bands=inference_bands,
+            selected_indices=inference_indices,
             band_reduction_pct=reduction_pct,
             mask_provenance=mask_prov,
             mask_path=used_mask_path,
+            candidate_bwoa_bands=candidate_bwoa_bands,
+            mask_compatibility_note=mask_compatibility_note,
             model_checkpoint=active_ckpt_path,
             model_provenance=model_prov,
             prediction=prediction_result,

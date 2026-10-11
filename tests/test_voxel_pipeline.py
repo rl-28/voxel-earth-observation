@@ -252,3 +252,92 @@ def test_result_serialization_schema(pipeline, tmp_path):
         loaded = json.load(f)
     assert loaded["query"] == result.query
     assert loaded["status"] == "COMPLETE"
+
+
+# -----------------------------------------------------------------------------
+# 10. Stage 0 Task Scope Qualifications
+# -----------------------------------------------------------------------------
+def test_stage0_task_scope_qualifications(pipeline):
+    """Verify that Stage 0 qualifies limitations for temporal depth and canopy density."""
+    # Test temporal water levels query
+    res_water = pipeline.run(
+        query="Track water levels over time in Loktak Lake",
+        mode="offline",
+        run_shap=False,
+        run_faiss=False,
+    )
+    assert any("does not quantify temporal water level/depth" in w.lower() for w in res_water.warnings)
+
+    # Test pixel canopy density query
+    res_forest = pipeline.run(
+        query="Measure tree canopy density percentage in Jim Corbett",
+        mode="offline",
+        run_shap=False,
+        run_faiss=False,
+    )
+    assert any("does not produce continuous canopy density" in w.lower() for w in res_forest.warnings)
+
+
+# -----------------------------------------------------------------------------
+# 11. BWOA Mask Decoupling & Model Channel Compatibility
+# -----------------------------------------------------------------------------
+def test_bwoa_mask_checkpoint_decoupling(pipeline):
+    """Verify that candidate BWOA masks differing from trained checkpoints are decoupled honestly."""
+    # Forest checkpoint was calibrated with [B02, B04, B06, B11, B12]
+    # We pass optimize=True to simulate candidate exploration
+    res = pipeline.run(
+        query="Assess forest cover in Jim Corbett National Park",
+        mode="offline",
+        optimize_bands=True,
+        run_shap=False,
+        run_faiss=False,
+    )
+    assert res.status == "COMPLETE"
+    assert res.mask_provenance in ["live_bwoa_candidate_decoupled", "checkpoint_trained_mask_applied", "precomputed_mask", "bwoa_optimized"]
+    # If live BWOA candidate differed from trained checkpoint, compatibility note must exist
+    if res.candidate_bwoa_bands:
+        assert res.mask_compatibility_note is not None
+        assert "decoupled" in res.mask_compatibility_note.lower() or "candidate" in res.mask_compatibility_note.lower()
+
+
+# -----------------------------------------------------------------------------
+# 12. Single-Tile Spatial Permutation SHAP Test
+# -----------------------------------------------------------------------------
+def test_single_tile_spatial_shap_permutation():
+    """Verify that compute_permutation_shap_attributions on a single tile (B=1) runs spatial permutation."""
+    from explainability.shap_engine import compute_permutation_shap_attributions
+    from models.fusion_net import FusionNet
+
+    torch.manual_seed(42)
+    device = torch.device("cpu")
+    mask = torch.tensor([0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1], dtype=torch.float32)  # 5 bands: B02, B04, B06, B11, B12
+    active_channels = int(mask.sum().item())
+
+    model = FusionNet(
+        num_classes=2,
+        total_bands=13,
+        selected_channels=active_channels,
+    ).to(device)
+    model.eval()
+
+    # Create a single tile (1, 13, 256, 256) with non-zero spatial variance
+    single_tile = torch.rand(1, 13, 256, 256, device=device)
+
+    attributions = compute_permutation_shap_attributions(
+        model=model,
+        sample_images=single_tile,
+        mask=mask,
+        num_permutations=2,
+        device="cpu",
+    )
+
+    assert isinstance(attributions, dict)
+    assert len(attributions) == 5  # 5 active channels
+    for band_idx, data in attributions.items():
+        assert "name" in data
+        assert "raw_score" in data
+        assert "percentage" in data
+        assert "is_informative" in data
+        assert isinstance(data["is_informative"], bool)
+
+

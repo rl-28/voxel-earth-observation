@@ -101,13 +101,19 @@ def compute_permutation_shap_attributions(
         delta_scores = []
 
         for _ in range(num_permutations):
-            # Clone input and permute the spatial pixels / tile values for this specific band
+            # Clone input and permute features for this specific spectral band
             permuted_images = sample_images.clone()
             b, c, h, w = permuted_images.shape
-            
-            # Shuffle spatial patches across the batch to destroy channel-specific feature correlations
-            perm_idx = torch.randperm(b, device=device)
-            permuted_images[:, band_idx, :, :] = sample_images[perm_idx, band_idx, :, :]
+
+            if b > 1:
+                # Multi-tile batch mode: shuffle across batch dimension
+                perm_idx = torch.randperm(b, device=device)
+                permuted_images[:, band_idx, :, :] = sample_images[perm_idx, band_idx, :, :]
+            else:
+                # Single-tile mode: spatially permute pixels within this channel to destroy spatial-spectral correlation
+                spatial_flat = sample_images[0, band_idx].reshape(-1)
+                pixel_perm = torch.randperm(h * w, device=device)
+                permuted_images[0, band_idx, :, :] = spatial_flat[pixel_perm].reshape(h, w)
 
             with torch.no_grad():
                 perm_logits = model(permuted_images, mask=mask)
@@ -116,19 +122,26 @@ def compute_permutation_shap_attributions(
 
             # Attribution is the expected reduction in top-class confidence
             impact = (baseline_conf - perm_conf).clamp(min=0.0).cpu().numpy()
-            delta_scores.append(np.mean(impact))
+            delta_scores.append(float(np.mean(impact)))
 
-        raw_importance = float(np.mean(delta_scores)) if delta_scores else 0.001
+        raw_importance = float(np.mean(delta_scores)) if delta_scores else 0.0
         channel_importance[band_idx] = {
             "band_idx": band_idx,
             "name": band_name,
-            "raw_score": max(raw_importance, 1e-4),
+            "raw_score": raw_importance,
         }
 
-    # 3. Normalize into relative percentages
+    # 3. Normalize into relative percentages honestly
     total_raw = sum(v["raw_score"] for v in channel_importance.values())
-    for band_idx, data in channel_importance.items():
-        data["percentage"] = (data["raw_score"] / total_raw) * 100.0
+    if total_raw > 1e-6:
+        for band_idx, data in channel_importance.items():
+            data["percentage"] = (data["raw_score"] / total_raw) * 100.0
+            data["is_informative"] = True
+    else:
+        # Honest representation: when perturbation causes no confidence change
+        for band_idx, data in channel_importance.items():
+            data["percentage"] = 0.0
+            data["is_informative"] = False
 
     return channel_importance
 
