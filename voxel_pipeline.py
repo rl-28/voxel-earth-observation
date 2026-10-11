@@ -111,7 +111,13 @@ class VoxelPipelineResult:
 
     def to_dict(self) -> Dict[str, Any]:
         """Serializes the result contract to a standard dictionary."""
-        return asdict(self)
+        d = asdict(self)
+        if "diagnostics" in d and isinstance(d["diagnostics"], dict):
+            d["diagnostics"] = {
+                k: v for k, v in d["diagnostics"].items()
+                if not (isinstance(v, np.ndarray) or k in ["rgb_image_array", "calibrated_tensor", "raw_tensor"])
+            }
+        return d
 
     def save_json(self, output_path: Union[str, Path]) -> str:
         """Saves execution result to a machine-readable JSON file."""
@@ -337,6 +343,8 @@ class VoxelPipeline:
             processed_tensor = first_tile_res.processed_tensor  # (13, 256, 256)
             metadata = {
                 "stac_item_id": selected_item.id,
+                "scene_id": selected_item.id,
+                "selected_item": selected_item.id,
                 "stac_provider": "AWS Earth Search (Element84)",
                 "collection": selected_item.collection_id,
                 "datetime": selected_item.datetime.isoformat() if selected_item.datetime else None,
@@ -705,7 +713,15 @@ class VoxelPipeline:
             cache_tag = f" [{mod1_meta.get('cache_status', 'Live')}]"
             data_source_label = f"Real Sentinel-2 L2A Scene ({mod1_meta.get('stac_item_id')}){cache_tag} via Element84 STAC"
             is_synthetic_flag = False
+            s_id = mod1_meta.get("stac_item_id") or mod1_meta.get("scene_id") or mod1_meta.get("selected_item")
+            if not s_id:
+                import re
+                match = re.search(r"S2[AB]_[0-9A-Z_]+_L2A", data_source_label)
+                if match:
+                    s_id = match.group(0)
             diagnostics["module1_metadata"] = mod1_meta
+            diagnostics["scene_id"] = s_id
+            diagnostics["stac_item_id"] = s_id
             diagnostics["cache_status"] = mod1_meta.get("cache_status", "Unknown")
         else:
             raw_tensor, mod1_meta = self.generate_synthetic_tile(task_key, seed=synthetic_seed)
@@ -728,6 +744,11 @@ class VoxelPipeline:
             print(f"  [+] Module 1 Tensor Prepared : Shape {input_shape_list} | Scale: [0.0, 1.0]")
             print(f"  [+] Module 1 Data Source     : {data_source_label}")
 
+        # Store calibrated surface reflectance tensor & per-band statistics in diagnostics
+        diagnostics["calibrated_tensor"] = tensor_channel_first
+        diagnostics["band_spectral_means"] = [float(np.mean(tensor_channel_first[i])) for i in range(13)]
+        diagnostics["band_spectral_stds"] = [float(np.std(tensor_channel_first[i])) for i in range(13)]
+
         # Generate and save RGB preview composite (B04: Red, B03: Green, B02: Blue)
         try:
             r = tensor_channel_first[3]  # B04
@@ -740,11 +761,12 @@ class VoxelPipeline:
             else:
                 rgb_scaled = np.clip(rgb, 0.0, 1.0)
             
-            rgb_preview_path = Path("results/latest_inference_rgb.png")
+            rgb_preview_path = (Path(__file__).resolve().parent / "results" / "latest_inference_rgb.png").resolve()
             rgb_preview_path.parent.mkdir(parents=True, exist_ok=True)
             import matplotlib.image as mpimg
             mpimg.imsave(rgb_preview_path, rgb_scaled)
             diagnostics["rgb_preview_path"] = str(rgb_preview_path)
+            diagnostics["rgb_image_array"] = rgb_scaled
         except Exception as e:
             logger.debug(f"RGB preview generation skipped: {e}")
 
