@@ -449,7 +449,7 @@ def render_scientific_heatmap(
 
     # Spine styling
     for spine in ax.spines.values():
-        spine.set_color("rgba(255, 255, 255, 0.1)")
+        spine.set_color((1.0, 1.0, 1.0, 0.1))
 
     # Tile labels
     for idx, val in enumerate(binary_vector):
@@ -519,9 +519,9 @@ def render_shap_bar_chart(
     ax.tick_params(colors="#94A3B8", labelsize=7)
 
     for spine in ax.spines.values():
-        spine.set_color("rgba(255, 255, 255, 0.08)")
+        spine.set_color((1.0, 1.0, 1.0, 0.08))
 
-    ax.grid(axis="x", color="rgba(255, 255, 255, 0.05)", linestyle="--", linewidth=0.5)
+    ax.grid(axis="x", color=(1.0, 1.0, 1.0, 0.05), linestyle="--", linewidth=0.5)
 
     ax.set_title(title, fontsize=9, fontweight="bold", color="#F1F5F9", pad=10)
     fig.tight_layout()

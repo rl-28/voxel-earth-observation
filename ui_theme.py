@@ -162,15 +162,44 @@ def inject_custom_styles():
     [data-testid="stSegmentedControl"],
     [data-testid="stPills"] {
         background: transparent !important;
+        margin-bottom: 16px !important;
     }
     [data-testid="stSegmentedControl"] button,
     [data-testid="stPills"] button {
         font-family: var(--font-sans) !important;
         font-size: 0.90rem !important;
         font-weight: 600 !important;
-        padding: 6px 16px !important;
+        padding: 8px 18px !important;
         border-radius: 6px !important;
+        background-color: #FFFFFF !important;
+        border: 1px solid var(--border-hover) !important;
+        color: var(--text-body) !important;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
         transition: all 0.15s ease !important;
+    }
+    [data-testid="stSegmentedControl"] button:hover,
+    [data-testid="stPills"] button:hover {
+        background-color: var(--primary-blue-subtle) !important;
+        border-color: var(--primary-blue) !important;
+        color: var(--primary-blue) !important;
+    }
+    [data-testid="stSegmentedControl"] button[aria-selected="true"],
+    [data-testid="stSegmentedControl"] button[data-checked="true"],
+    [data-testid="stPills"] button[aria-selected="true"],
+    [data-testid="stPills"] button[data-checked="true"] {
+        background-color: var(--primary-blue) !important;
+        color: #FFFFFF !important;
+        border-color: var(--primary-blue) !important;
+        box-shadow: 0 2px 4px rgba(37, 99, 235, 0.25) !important;
+    }
+
+    /* Horizontal Radiogroup (Top Nav Alternative) */
+    div[data-testid="stRadio"] > div[role="radiogroup"] {
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 8px !important;
+        flex-wrap: wrap !important;
+        margin-bottom: 16px !important;
     }
 
     /* Typography & Headings */
@@ -776,6 +805,145 @@ def plot_light_training_curve(csv_path: Path, title: str):
     return fig
 
 
+def compute_spectral_index_figure(tensor: np.ndarray, task_type: str):
+    """
+    Computes scientific spectral index (NDWI for waterbody, NDVI for forest_cover)
+    from calibrated Sentinel-2 BOA surface reflectance tensor (13, 256, 256).
+    Returns (fig, index_name, formula_label, note).
+    """
+    import matplotlib.pyplot as plt
+
+    if task_type == "waterbody":
+        # NDWI = (B03 - B08) / (B03 + B08)
+        b_green = tensor[2].astype(np.float32)
+        b_nir = tensor[7].astype(np.float32)
+        denom = b_green + b_nir
+        with np.errstate(divide="ignore", invalid="ignore"):
+            idx_arr = np.where(denom > 1e-6, (b_green - b_nir) / denom, 0.0)
+        idx_arr = np.nan_to_num(idx_arr, nan=0.0, posinf=1.0, neginf=-1.0)
+        idx_arr = np.clip(idx_arr, -1.0, 1.0)
+        cmap = "Blues"
+        index_name = "Normalized Difference Water Index (NDWI)"
+        formula = "(B03 - B08) / (B03 + B08)"
+        cbar_label = "NDWI Ratio [-1.0 to 1.0] (Water: > 0.0)"
+    else:
+        # NDVI = (B08 - B04) / (B08 + B04)
+        b_red = tensor[3].astype(np.float32)
+        b_nir = tensor[7].astype(np.float32)
+        denom = b_nir + b_red
+        with np.errstate(divide="ignore", invalid="ignore"):
+            idx_arr = np.where(denom > 1e-6, (b_nir - b_red) / denom, 0.0)
+        idx_arr = np.nan_to_num(idx_arr, nan=0.0, posinf=1.0, neginf=-1.0)
+        idx_arr = np.clip(idx_arr, -1.0, 1.0)
+        cmap = "YlGn"
+        index_name = "Normalized Difference Vegetation Index (NDVI)"
+        formula = "(B08 - B04) / (B08 + B04)"
+        cbar_label = "NDVI Ratio [-1.0 to 1.0] (Canopy: > 0.3)"
+
+    fig, ax = plt.subplots(figsize=(4.6, 4.0), dpi=150)
+    im = ax.imshow(idx_arr, cmap=cmap, vmin=-0.8, vmax=0.8)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_title(f"{index_name}\nFormula: {formula}", fontsize=9, fontweight="bold", color="#0F172A", pad=8)
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.ax.tick_params(labelsize=7.5, colors="#475569")
+    cbar.set_label(cbar_label, fontsize=7.5, color="#334155")
+    style_light_figure(fig, ax)
+    fig.tight_layout()
+    return fig, index_name, formula
+
+
+def compute_spectral_signature_figure(tensor: np.ndarray, selected_bands: List[str]):
+    """
+    Generates publication-quality spectral reflectance signature chart from actual loaded
+    calibrated 13-channel Sentinel-2 BOA tensor.
+    Displays:
+    - Wavelength (nm) and canonical band IDs
+    - Tile-mean surface reflectance and ±1σ spatial variance envelope
+    - Highlights task-specific selected BWOA bands
+    - Excludes/distinguishes B10 (1375 nm cirrus) as refused/zero in L2A BOA
+    """
+    import matplotlib.pyplot as plt
+
+    band_info = [
+        {"name": "B01", "idx": 0, "wl": 443, "res": "60m", "desc": "Coastal", "usable": True},
+        {"name": "B02", "idx": 1, "wl": 490, "res": "10m", "desc": "Blue", "usable": True},
+        {"name": "B03", "idx": 2, "wl": 560, "res": "10m", "desc": "Green", "usable": True},
+        {"name": "B04", "idx": 3, "wl": 665, "res": "10m", "desc": "Red", "usable": True},
+        {"name": "B05", "idx": 4, "wl": 705, "res": "20m", "desc": "RE1", "usable": True},
+        {"name": "B06", "idx": 5, "wl": 740, "res": "20m", "desc": "RE2", "usable": True},
+        {"name": "B07", "idx": 6, "wl": 783, "res": "20m", "desc": "RE3", "usable": True},
+        {"name": "B08", "idx": 7, "wl": 842, "res": "10m", "desc": "NIR", "usable": True},
+        {"name": "B8A", "idx": 8, "wl": 865, "res": "20m", "desc": "NIR-N", "usable": True},
+        {"name": "B09", "idx": 9, "wl": 945, "res": "60m", "desc": "WV", "usable": True},
+        {"name": "B10", "idx": 10, "wl": 1375, "res": "60m", "desc": "Cirrus", "usable": False},
+        {"name": "B11", "idx": 11, "wl": 1610, "res": "20m", "desc": "SWIR1", "usable": True},
+        {"name": "B12", "idx": 12, "wl": 2190, "res": "20m", "desc": "SWIR2", "usable": True},
+    ]
+
+    usable_info = [b for b in band_info if b["usable"]]
+    wls = [b["wl"] for b in usable_info]
+    means = [float(np.mean(tensor[b["idx"]])) for b in usable_info]
+    stds = [float(np.std(tensor[b["idx"]])) for b in usable_info]
+
+    fig, ax = plt.subplots(figsize=(6.4, 3.2), dpi=150)
+    
+    # Plot standard deviation envelope across the 256x256 tile
+    upper = np.array(means) + np.array(stds)
+    lower = np.clip(np.array(means) - np.array(stds), 0.0, 1.0)
+    ax.fill_between(wls, lower, upper, color="#DBEAFE", alpha=0.5, label="±1σ Spatial Variance (256×256 Tile)")
+
+    # Plot baseline spectral reflectance curve
+    ax.plot(wls, means, color="#2563EB", linewidth=1.8, marker="o", markersize=4, label="Tile-Mean BOA Reflectance", zorder=3)
+
+    # Highlight task-specific selected bands vs unselected bands
+    for b_item in usable_info:
+        idx_in_usable = usable_info.index(b_item)
+        wl = b_item["wl"]
+        mean_val = means[idx_in_usable]
+        b_name = b_item["name"]
+        is_sel = b_name in selected_bands
+        
+        if is_sel:
+            ax.scatter([wl], [mean_val], color="#16A34A", s=55, edgecolor="#14532D", linewidth=1.5, zorder=5)
+            ax.annotate(
+                f"{b_name}*",
+                (wl, mean_val),
+                textcoords="offset points",
+                xytext=(0, 6),
+                ha="center",
+                fontsize=7.5,
+                fontweight="bold",
+                color="#15803D",
+            )
+        else:
+            ax.scatter([wl], [mean_val], color="#94A3B8", s=22, edgecolor="#64748B", linewidth=0.8, zorder=4)
+            ax.annotate(
+                b_name,
+                (wl, mean_val),
+                textcoords="offset points",
+                xytext=(0, 5),
+                ha="center",
+                fontsize=7.0,
+                color="#64748B",
+            )
+
+    # Indicate B10 Cirrus exclusion
+    ax.axvline(1375, color="#DC2626", linestyle=":", alpha=0.6, linewidth=1.0)
+    max_m = max(means) if means else 0.4
+    ax.annotate("B10 Cirrus\n(Refused in L2A)", (1375, max(max_m * 0.85, 0.15)),
+                textcoords="offset points", xytext=(5, 0), fontsize=7.0, color="#DC2626", fontstyle="italic")
+
+    ax.set_xlabel("Central Wavelength λ (nm)", fontsize=8.5, color="#334155")
+    ax.set_ylabel("Surface Reflectance [0.0, 1.0]", fontsize=8.5, color="#334155")
+    ax.set_title("Calibrated Sentinel-2 L2A BOA Spectral Reflectance Profile", fontsize=9.5, fontweight="bold", color="#0F172A", pad=8)
+    ax.set_ylim(0.0, min(1.0, max(upper) * 1.25 if len(upper) > 0 and max(upper) > 0 else 0.5))
+    ax.legend(loc="upper right", fontsize=7.5, framealpha=0.9)
+    style_light_figure(fig, ax)
+    fig.tight_layout()
+    return fig
+
+
 # Backward-compatible alias
 plot_dark_training_curve = plot_light_training_curve
 
@@ -896,11 +1064,18 @@ def get_system_telemetry_status(project_root: Path) -> Dict[str, Dict[str, Any]]
             v_source = "Local Pytest Suite (Verified)"
             v_class = "voxel-badge-success"
 
+    mod1_dict = {"label": "Module 1 (Ingestion)", "status": m1_status, "detail": m1_detail, "class": m1_class}
+    mod2_dict = {"label": "Module 2 (BWOA)", "status": m2_status, "detail": m2_detail, "class": m2_class}
+    mod3_dict = {"label": "Module 3 (FusionNet)", "status": m3_status, "detail": m3_detail, "class": m3_class}
+    ver_dict = {"label": "Verification Suite", "status": v_status, "timestamp": v_timestamp, "source": v_source, "class": v_class}
     return {
-        "module1": {"label": "Module 1 (Ingestion)", "status": m1_status, "detail": m1_detail, "class": m1_class},
-        "module2": {"label": "Module 2 (BWOA)", "status": m2_status, "detail": m2_detail, "class": m2_class},
-        "module3": {"label": "Module 3 (FusionNet)", "status": m3_status, "detail": m3_detail, "class": m3_class},
-        "verification": {"label": "Verification Suite", "status": v_status, "timestamp": v_timestamp, "source": v_source, "class": v_class},
+        "module1": mod1_dict,
+        "module2": mod2_dict,
+        "module3": mod3_dict,
+        "m1": mod1_dict,
+        "m2": mod2_dict,
+        "m3": mod3_dict,
+        "verification": ver_dict,
     }
 
 
