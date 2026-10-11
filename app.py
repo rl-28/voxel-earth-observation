@@ -2,18 +2,17 @@
 VOXEL: Task-Adaptive Earth Observation & Spectral Intelligence Platform
 Streamlit Dashboard (app.py)
 
-Cinematic High-Contrast Earth-Observation Interface & Scientific Verification Hub:
-  Section 1: 🚀 End-to-End Orchestrator
-  Section 2: 🔬 Dataset Provenance & Model Verification
-  Section 3: 📡 Module 1: Satellite Ingestion & Signal Processing
-  Section 4: ⚡ Module 2: Physics-Guided Spectral Band Optimization
-  Section 5: 🧠 Module 3: CNN-ViT FusionNet, Explainability & FAISS Retrieval
+Minimal, Professional Light-Theme Research Dashboard:
+  Section 1: 🛰️ Satellite Analysis (Primary Screen: Natural Language Query, Real STAC Ingestion, RGB Composite, CNN-ViT Classification)
+  Section 2: 📊 Research & Evaluation (Dataset Provenance, Zero-Leakage Spatial Split, Checkpoint Registry, Confusion Matrices)
+  Section 3: ⚡ Spectral Optimization (Module 2: Physics-Guided Band Selection, Calibrated BWOA Masks, Live Search)
+  Section 4: 📡 Satellite Ingestion (Module 1: STAC Tiling, Radiometric Normalization, BOA Calibration)
+  Section 5: 🧠 Deep Architecture (Module 3: Hybrid FusionNet CNN-ViT, Latent Vector Space, FAISS Retrieval)
 """
 
 import os
 import sys
 import json
-import time
 import zipfile
 import tempfile
 import traceback
@@ -48,12 +47,14 @@ from config.constants import (
 from utils.band_mask import describe_band_mask
 from ui_theme import (
     inject_custom_styles,
-    render_cinematic_hero,
+    render_academic_header,
     render_operational_header,
     render_spectral_matrix,
     render_hud_prediction,
-    style_dark_space_figure,
-    plot_dark_training_curve,
+    style_light_figure,
+    plot_light_training_curve,
+    get_verified_runtime_status,
+    get_system_telemetry_status,
 )
 
 
@@ -67,21 +68,20 @@ def process_bands(band_paths: dict):
     """
     st.subheader("Processing Diagnostics")
     pipeline = Module1Pipeline()
-    
+
     try:
         results = []
         for res in pipeline.process_scene(band_paths):
             results.append(res)
-            st.write(f"Processed `{res.tile_id}` successfully.")
+            st.write(f"Processed tile `{res.tile_id}` successfully.")
             with st.expander(f"Diagnostics: {res.tile_id}"):
                 st.json(res.diagnostics)
                 st.write(f"**Contract Type:** `{res.diagnostics.get('contract_type')}`")
                 st.write(f"**Shape:** `{res.output_shape}`")
-                
-                # Check 12 vs 13 bands and display warning if necessary
+
                 if len(res.output_shape) >= 3 and res.output_shape[2] == 12:
-                    st.warning("MODULE 2 HANDOFF: Output has 12 channels (Sentinel-2 L2A intermediate). Project-level 13th channel mapping remains unresolved.")
-                
+                    st.warning("Module 2 Handoff: Output has 12 channels (Sentinel-2 L2A intermediate).")
+
         st.success("Module 1 Processing Complete.")
         return results
     except Exception as e:
@@ -97,188 +97,215 @@ def process_bands(band_paths: dict):
 def render_dashboard():
     # Set Page Config
     st.set_page_config(
-        page_title="VOXEL: Spectral Intelligence Platform",
+        page_title="VOXEL | Earth Observation Research Platform",
         page_icon="🛰️",
         layout="wide",
         initial_sidebar_state="expanded",
     )
 
-    # Inject High-Contrast Dark Space Theme
+    # Inject Light Theme Academic Design System
     inject_custom_styles()
 
-    # Initialize Session State for Pipeline Results
+    # Initialize Session State
     if "latest_pipeline_result" not in st.session_state:
         st.session_state["latest_pipeline_result"] = None
-    if "last_query" not in st.session_state:
-        st.session_state["last_query"] = None
+    if "active_query" not in st.session_state:
+        st.session_state["active_query"] = "Track waterbody levels in Loktak Lake, Manipur"
+
+    # Inspect genuine filesystem & module verification status (lightweight, zero expensive IO)
+    telemetry = get_system_telemetry_status(PROJECT_ROOT)
+    m1 = telemetry["module1"]
+    m2 = telemetry["module2"]
+    m3 = telemetry["module3"]
+    ver = telemetry["verification"]
 
     # -------------------------------------------------------------------------
-    # SIDEBAR: COMPACT VERTICAL NAVIGATION & PROVENANCE TELEMETRY
+    # SIDEBAR: NAVIGATION & VERIFIED RUNTIME TELEMETRY
     # -------------------------------------------------------------------------
     with st.sidebar:
         st.markdown(
             """
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
-                <span class="voxel-pulse-dot"></span>
-                <span style="font-family: var(--font-display); font-size: 1.35rem; font-weight: 800; color: #ffffff; letter-spacing: 0.06em;">VOXEL</span>
-            </div>
-            <div style="font-family: var(--font-tech); font-size: 0.78rem; color: var(--electric-cyan); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px;">
-                ORBITAL SPECTRAL ENGINE
+            <div style="margin-bottom: 14px;">
+                <div style="font-size: 1.35rem; font-weight: 800; color: #0F172A; letter-spacing: -0.02em;">
+                    🛰️ VOXEL
+                </div>
+                <div style="font-size: 0.80rem; font-weight: 600; color: #2563EB; text-transform: uppercase; letter-spacing: 0.05em;">
+                    Earth Observation Platform
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        # Accessible Vertical Module Navigation (prevents horizontal tab clipping)
+        # Clear, accessible navigation radio
         nav_selection = st.radio(
-            "MODULE NAVIGATION",
+            "RESEARCH MODULES",
             [
-                "🚀 01 // Orchestrator",
-                "🔬 02 // Provenance & Verification",
-                "📡 03 // Module 1: Ingestion",
-                "⚡ 04 // Module 2: BWOA Optimization",
-                "🧠 05 // Module 3: Deep Learning",
+                "🛰️ Satellite Analysis",
+                "📊 Research & Evaluation",
+                "⚡ Spectral Optimization (Module 2)",
+                "📡 Satellite Ingestion (Module 1)",
+                "🧠 Deep Architecture (Module 3)",
             ],
-            key="nav_selection",
+            key="main_nav_radio",
         )
 
-        st.markdown("---")
+        st.markdown("<hr style='margin: 14px 0; border: none; border-top: 1px solid #E2E8F0;'/>", unsafe_allow_html=True)
 
-        # Telemetry & Verification Status Panel
+        # Genuine System Telemetry & Module Health Checks
         st.markdown(
-            """
+            f"""
             <div class="voxel-card" style="padding: 12px 14px; margin-bottom: 12px;">
-                <div style="font-family: var(--font-tech); font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">
-                    SYSTEM TELEMETRY
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">
+                    SYSTEM TELEMETRY &amp; HEALTH
                 </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                    <span style="font-size: 0.82rem; color: #cbd5e1;">Module 1 Ingestion</span>
-                    <span class="voxel-badge-success">ONLINE</span>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span style="font-size: 0.82rem; color: #334155;">{m1['label']}</span>
+                    <span class="{m1['class']}">{m1['status']}</span>
                 </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                    <span style="font-size: 0.82rem; color: #cbd5e1;">Module 2 BWOA</span>
-                    <span class="voxel-badge-success">ONLINE</span>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span style="font-size: 0.82rem; color: #334155;">{m2['label']}</span>
+                    <span class="{m2['class']}">{m2['status']}</span>
                 </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                    <span style="font-size: 0.82rem; color: #cbd5e1;">Module 3 FusionNet</span>
-                    <span class="voxel-badge-success">HARDENED</span>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span style="font-size: 0.82rem; color: #334155;">{m3['label']}</span>
+                    <span class="{m3['class']}">{m3['status']}</span>
                 </div>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 0.82rem; color: #cbd5e1;">Verification Suite</span>
-                    <span style="font-family: var(--font-mono); font-size: 0.78rem; color: var(--electric-cyan);">178 PASS (CI)</span>
+                <div style="border-top: 1px dashed #E2E8F0; margin-top: 8px; padding-top: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 0.82rem; color: #334155;">{ver['label']}</span>
+                        <span class="{ver['class']}">{ver['status']}</span>
+                    </div>
+                    <div style="font-size: 0.72rem; color: #64748B; margin-top: 3px;">
+                        {f"⏱️ {ver['timestamp']} · {ver['source']}" if ver['timestamp'] else f"⚠️ {ver['source']}"}
+                    </div>
                 </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
+        # Scientific Scope Disclaimers
         st.markdown(
             """
-            <div class="voxel-card" style="padding: 12px 14px;">
-                <div style="font-family: var(--font-tech); font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
-                    SCIENTIFIC GATING
+            <div class="voxel-card" style="padding: 12px 14px; background: #F8FAFC;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">
+                    SCIENTIFIC INTEGRITY GATES
                 </div>
-                <div style="font-size: 0.78rem; color: #94a3b8; line-height: 1.45;">
-                    <p style="margin: 0 0 3px 0;"><span style="color: #6ee7b7;">●</span> <b>Real Sentinel-2:</b> BOA Calibrated</p>
-                    <p style="margin: 0 0 3px 0;"><span style="color: #6ee7b7;">●</span> <b>Holdout:</b> Hirakud 19-Tile Scene</p>
-                    <p style="margin: 0 0 3px 0;"><span style="color: #fcd34d;">●</span> <b>Atmospheric:</b> B10 Refused</p>
-                    <p style="margin: 0;"><span style="color: #38bdf8;">●</span> <b>Mask Safety:</b> Calibrated Decoupling</p>
+                <div style="font-size: 0.78rem; color: #475569; line-height: 1.45;">
+                    <p style="margin: 0 0 3px 0;">● <b>Surface Reflectance:</b> Sentinel-2 BOA [0.0, 1.0]</p>
+                    <p style="margin: 0 0 3px 0;">● <b>Spatial Footprint:</b> 256×256 px (2.56 km²)</p>
+                    <p style="margin: 0 0 3px 0;">● <b>Atmospheric Cirrus:</b> Band 10 Refused</p>
+                    <p style="margin: 0;">● <b>Model Compatibility:</b> Mask Decoupled</p>
                 </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        st.caption("VOXEL Platform © 2026. Task-Adaptive Multi-Spectral Intelligence.")
+        st.caption("VOXEL Platform · Sentinel-2 MSI Multi-Spectral Intelligence")
 
     # =========================================================================
-    # SECTION 1: END-TO-END ORCHESTRATOR
+    # SECTION 1: PRIMARY SCREEN - SATELLITE ANALYSIS
     # =========================================================================
-    if nav_selection == "🚀 01 // Orchestrator":
-        # Cinematic Earth Hero (Compact top banner)
-        render_cinematic_hero()
-
-        st.markdown(
-            """
-            <div class="voxel-section-header">
-                <h2>Orbital Orchestrator</h2>
-                <p>Natural Language Query ➔ Stage 0 Compilation ➔ Sentinel-2 STAC Ingestion ➔ Physics BWOA ➔ CNN-ViT FusionNet Inference</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    if nav_selection == "🛰️ Satellite Analysis":
+        render_academic_header(
+            "Task-Adaptive Satellite Analysis",
+            "Natural Language Query Compilation ➔ STAC Ingestion ➔ Physics-Guided Band Optimization ➔ CNN-ViT FusionNet",
+            "VOXEL ORCHESTRATOR"
         )
 
-        # Control Panel Card
+        # Primary Query Input Card
         st.markdown('<div class="voxel-card">', unsafe_allow_html=True)
-        col1, col2 = st.columns([3, 2])
-        with col1:
-            st.markdown('<div class="voxel-card-header">1. TARGET &amp; TASK SELECTION</div>', unsafe_allow_html=True)
-            preset_query = st.selectbox(
-                "Select Verified Location or Custom Query:",
-                [
-                    "Track waterbody levels in Loktak Lake, Manipur",
-                    "Assess forest canopy in Jim Corbett National Park, Uttarakhand",
-                    "Identify water bodies around Chilika Lake, Odisha, India",
-                    "Analyze forest canopy and tree cover around Western Ghats, Karnataka, India",
-                    "Monitor agricultural crop health in Punjab, India",
-                    "Custom query...",
-                ]
-            )
-            if preset_query == "Custom query...":
-                user_query = st.text_input("Natural Language Query:", "Track waterbody levels in Loktak Lake, Manipur")
-            else:
-                user_query = st.text_input("Active Target Query:", preset_query)
+        
+        # Suggested location chips for one-click testing
+        st.markdown('<div style="font-size: 0.82rem; font-weight: 600; color: #64748B; margin-bottom: 6px;">VERIFIED INDIAN RESEARCH TARGETS:</div>', unsafe_allow_html=True)
+        col_c1, col_c2, col_c3, col_c4 = st.columns(4)
+        if col_c1.button("📍 Loktak Lake (Water)", use_container_width=True):
+            st.session_state["active_query"] = "Track waterbody levels in Loktak Lake, Manipur"
+        if col_c2.button("📍 Jim Corbett (Forest)", use_container_width=True):
+            st.session_state["active_query"] = "Assess forest canopy in Jim Corbett National Park, Uttarakhand"
+        if col_c3.button("📍 Chilika Lake (Water)", use_container_width=True):
+            st.session_state["active_query"] = "Identify water bodies around Chilika Lake, Odisha, India"
+        if col_c4.button("📍 Western Ghats (Forest)", use_container_width=True):
+            st.session_state["active_query"] = "Analyze forest canopy and tree cover around Western Ghats, Karnataka, India"
 
-            task_choice = st.radio(
+        st.markdown('<div style="margin-top: 10px;"></div>', unsafe_allow_html=True)
+        query_input = st.text_input(
+            "Earth Observation Target Query:",
+            value=st.session_state.get("active_query", "Track waterbody levels in Loktak Lake, Manipur"),
+            placeholder="e.g., Track waterbody levels in Loktak Lake, Manipur",
+            help="Enter a geographic region and natural language task objective."
+        )
+
+        # Task Selection & Primary Execution
+        q_col1, q_col2 = st.columns([2, 1])
+        with q_col1:
+            task_mode = st.radio(
                 "Task Profile Mode:",
                 ["auto", "waterbody", "forest_cover"],
                 format_func=lambda x: "Auto-Detect from Query" if x == "auto" else ("Waterbody Classification (6 Bands)" if x == "waterbody" else "Forest Cover Classification (5 Bands)"),
                 horizontal=True,
+                help="Automatically routes to the appropriate physics domain and verified checkpoint."
             )
+        with q_col2:
+            st.markdown('<div style="margin-top: 24px;"></div>', unsafe_allow_html=True)
+            launch_btn = st.button("▶ Run Analysis", type="primary", use_container_width=True)
 
-        with col2:
-            st.markdown('<div class="voxel-card-header">2. EXECUTION SETTINGS</div>', unsafe_allow_html=True)
-            exec_mode = st.radio(
-                "Execution Mode:",
-                ["real", "offline"],
-                format_func=lambda x: "🛰️ Real Satellite Mode (STAC Acquisition)" if x == "real" else "🧪 Offline Smoke Test (Synthetic Fixture)"
-            )
-            sc1, sc2 = st.columns(2)
-            with sc1:
-                run_bwoa = st.checkbox("Live BWOA Optimization", value=False, help="Executes fresh Binary Whale Optimization on the scene tensor.")
-                run_faiss = st.checkbox("Semantic Latent Retrieval", value=True, help="Queries FAISS index on 1216-dim latent vector.")
-            with sc2:
-                run_shap = st.checkbox("Compute SHAP Attributions", value=False, help="Optional: Computes live spatial permutation SHAP scores (adds ~2s latency).")
+        # Advanced Controls inside a clean collapsible expander
+        with st.expander("⚙️ Advanced Analysis & Optimization Settings", expanded=False):
+            ac1, ac2 = st.columns(2)
+            with ac1:
+                exec_mode = st.radio(
+                    "Acquisition Pipeline:",
+                    ["real", "offline"],
+                    format_func=lambda x: "🛰️ Real Satellite Mode (STAC Acquisition / Cached Tiles)" if x == "real" else "🧪 Offline Smoke Test (Synthetic Fixture)",
+                    horizontal=True,
+                )
+                run_bwoa = st.checkbox(
+                    "Execute Live BWOA Band Search",
+                    value=False,
+                    help="Runs fresh Binary Whale Optimization on the scene tensor to discover an exploratory spectral subset. Validated model applies verified calibration mask."
+                )
+            with ac2:
+                run_shap = st.checkbox(
+                    "Compute Permutation SHAP Attributions",
+                    value=False,
+                    help="Computes live spatial-pixel permutation feature attributions across active channels (~2s extra compute)."
+                )
+                run_faiss = st.checkbox(
+                    "Query FAISS Latent Vector Index",
+                    value=True,
+                    help="Queries nearest-neighbor latent representations (1216-dim) in the EuroSAT benchmark corpus."
+                )
 
-        st.markdown('<div style="margin-top: 10px;"></div>', unsafe_allow_html=True)
-        launch_btn = st.button("🚀 EXECUTE ORBITAL PIPELINE", type="primary", use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
         # Pipeline Execution Handler
         if launch_btn:
-            with st.spinner("Executing orbital pipeline (Stage 0 ➔ Module 1 STAC ➔ Module 2 BWOA ➔ Module 3 FusionNet)..."):
+            with st.spinner("Executing VOXEL Earth Observation Pipeline (Geocoding ➔ STAC ➔ Optimization ➔ FusionNet)..."):
                 try:
                     pipeline = VoxelPipeline(default_mode=exec_mode, verbose=False)
                     res: VoxelPipelineResult = pipeline.run(
-                        query=user_query,
+                        query=query_input,
                         mode=exec_mode,
-                        task_override=None if task_choice == "auto" else task_choice,
+                        task_override=None if task_mode == "auto" else task_mode,
                         explain_shap=run_shap,
                         run_faiss=run_faiss,
                         optimize_bands=run_bwoa,
                     )
                     st.session_state["latest_pipeline_result"] = res
-                    st.session_state["last_query"] = user_query
+                    st.session_state["active_query"] = query_input
                 except Exception as e:
-                    st.error(f"Pipeline execution error: {str(e)}")
-                    st.code(traceback.format_exc())
+                    st.error(f"Pipeline Execution Failed: {str(e)}")
+                    with st.expander("Diagnostic Traceback"):
+                        st.code(traceback.format_exc())
 
         # Render Active or Persisted Results
         res: Optional[VoxelPipelineResult] = st.session_state.get("latest_pipeline_result")
 
         if res is not None:
-            # 1. Top HUD Result Card
-            st.markdown("---")
+            # 1. Prediction & Provenance Banner
             if res.prediction:
                 render_hud_prediction(
                     res.prediction,
@@ -287,377 +314,282 @@ def render_dashboard():
                     compatibility_note=res.mask_compatibility_note,
                 )
             else:
+                st.warning("⚠️ Prediction withheld: Spectral mask channels do not match calibrated input weights of the real trained model.")
+
+            # Task Scope Qualifications Notice (if applicable)
+            if "task_qualifications" in res.diagnostics and res.diagnostics["task_qualifications"]:
+                for q_note in res.diagnostics["task_qualifications"]:
+                    st.info(f"ℹ️ **Research Qualification:** {q_note}")
+
+            # 2. Key Telemetry Metrics
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Active Bands", f"{len(res.selected_bands)} / 13", f"-{res.band_reduction_pct:.1f}% Volume")
+            m2.metric("Total Latency", f"{res.timing_breakdown_ms.get('total_pipeline_latency_ms', 0):.0f} ms", "Sub-second Pipeline")
+            prov_label = "Live Sentinel-2" if not res.is_synthetic else "Synthetic Fixture"
+            m3.metric("Data Source", prov_label, res.resolved_location.get("name", "India"))
+            m4.metric("Surface Radiometry", "BOA [0.0, 1.0]", "L2A Surface Reflectance")
+
+            # 3. Prominent Visual Evidence (RGB Satellite Composite + Spectral Matrix)
+            st.markdown('<div style="margin-top: 14px;"></div>', unsafe_allow_html=True)
+            vcol1, vcol2 = st.columns([1, 1.25])
+
+            with vcol1:
+                st.markdown('<div class="voxel-card">', unsafe_allow_html=True)
+                st.markdown('<div class="voxel-card-header">SATELLITE RGB COMPOSITE</div>', unsafe_allow_html=True)
+                if res.diagnostics.get("rgb_preview_path") and os.path.exists(res.diagnostics["rgb_preview_path"]):
+                    st.image(
+                        res.diagnostics["rgb_preview_path"],
+                        caption="Sentinel-2 L2A True-Color Composite (B04-Red, B03-Green, B02-Blue)",
+                        use_container_width=True
+                    )
+                else:
+                    st.info("True-color composite preview unavailable for this tile.")
+                
+                # Spatial & Acquisition Metadata
                 st.markdown(
-                    """
-                    <div class="voxel-card" style="border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.05);">
-                        <span class="voxel-badge-warning">🛡️ SCIENTIFIC GATING ENFORCED</span>
-                        <h3 style="margin-top: 6px; color: #fcd34d;">Prediction Withheld for Scientific Authenticity</h3>
-                        <p style="color: #94a3b8; font-size: 0.9rem; margin: 0;">
-                            Candidate spectral mask channels do not match the calibrated input weights of the real trained model checkpoint. 
-                            VOXEL strictly prevents uncalibrated tensor forward passes.
-                        </p>
+                    f"""
+                    <div style="font-size: 0.82rem; color: #64748B; margin-top: 8px; line-height: 1.5;">
+                        <div><b>Location:</b> {res.resolved_location.get('name', 'N/A')}</div>
+                        <div><b>Coordinates:</b> <code>{res.resolved_location.get('bbox', 'N/A')}</code></div>
+                        <div><b>Input Tensor:</b> <code>{res.input_tensor_shape}</code> (10m/px)</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
-
-            # Task Scope Qualification Notice (if applicable)
-            if "task_qualifications" in res.diagnostics and res.diagnostics["task_qualifications"]:
-                for q_note in res.diagnostics["task_qualifications"]:
-                    st.info(f"ℹ️ {q_note}")
-
-            # 2. Telemetry Metrics Strip
-            st.markdown('<div style="margin-top: 14px;"></div>', unsafe_allow_html=True)
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Task Profile", res.task_type.upper(), f"{len(res.selected_bands)} Bands Active")
-            m2.metric("Volume Reduction", f"-{res.band_reduction_pct:.1f}%", f"{13 - len(res.selected_bands)} Pruned")
-            m3.metric("Total Latency", f"{res.timing_breakdown_ms.get('total_pipeline_latency_ms', 0):.1f} ms", "Sub-Second DL")
-            prov_label = "Live Sentinel-2" if not res.is_synthetic else "Synthetic Fixture"
-            m4.metric("Data Provenance", prov_label, "STAC L2A Calibrated")
-
-            # 3. Pipeline Progress & Diagnostics Grid
-            st.markdown("---")
-            st.markdown('<div class="voxel-section-header"><h2>Pipeline Progress &amp; Diagnostics</h2></div>', unsafe_allow_html=True)
-            
-            s0_col, s1_col, s2_col, s3_col = st.columns(4)
-            with s0_col:
-                st.markdown(
-                    """
-                    <div class="voxel-card" style="height: 100%;">
-                        <div class="voxel-card-header">STAGE 0 // COMPILER</div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                st.write(f"**Target:** `{res.resolved_location.get('name')}`")
-                st.write(f"**BBox:** `{res.resolved_location.get('bbox')}`")
-                st.write(f"**Geocoder:** `{res.resolved_location.get('geocoder')}`")
-                st.caption(f"Latency: {res.timing_breakdown_ms.get('stage_0_query_compilation_ms', 0):.1f} ms")
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            with s1_col:
-                st.markdown(
-                    """
-                    <div class="voxel-card" style="height: 100%;">
-                        <div class="voxel-card-header">MODULE 1 // INGESTION</div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                st.write(f"**Tensor:** `{res.input_tensor_shape}`")
-                st.write(f"**Source:** `{res.data_source}`")
-                if "cache_status" in res.diagnostics:
-                    st.write(f"**Cache Status:** `{res.diagnostics['cache_status']}`")
-                st.write(f"**Radiometric:** `[0.0, 1.0] BOA`")
-                st.caption(f"Latency: {res.timing_breakdown_ms.get('module_1_ingestion_ms', 0):.1f} ms")
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            with s2_col:
-                st.markdown(
-                    """
-                    <div class="voxel-card" style="height: 100%;">
-                        <div class="voxel-card-header">MODULE 2 // BWOA</div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                st.write(f"**Inference Bands ({len(res.selected_bands)}):** `{', '.join(res.selected_bands)}`")
-                if res.candidate_bwoa_bands:
-                    st.write(f"**Live BWOA Candidate:** `{', '.join(res.candidate_bwoa_bands)}`")
-                    st.write("**Strategy:** `Decoupled for Validity`")
-                else:
-                    st.write(f"**Strategy:** `{res.mask_provenance}`")
-                st.write(f"**B10 Cirrus:** `🔒 Refused (0.0)`")
-                st.caption(f"Latency: {res.timing_breakdown_ms.get('module_2_optimization_ms', 0):.1f} ms")
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            with s3_col:
-                st.markdown(
-                    """
-                    <div class="voxel-card" style="height: 100%;">
-                        <div class="voxel-card-header">MODULE 3 // DEEP INFERENCE</div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                if res.prediction:
-                    st.write(f"**Class:** `{res.prediction.get('predicted_class_name')}`")
-                    st.write(f"**Confidence:** `{res.prediction.get('confidence_pct', 0):.1f}%`")
-                    prov = res.prediction.get("provenance")
-                    prov_badge = "✅ Genuine Real Model" if prov == "real_inference" else "⚠️ Synthetic Fixture"
-                    st.write(f"**Model:** `{prov_badge}`")
-                    if "all_probabilities" in res.prediction:
-                        for cls_name, p_val in res.prediction["all_probabilities"].items():
-                            st.progress(p_val / 100.0, text=f"{cls_name}: {p_val:.1f}%")
-                else:
-                    st.warning("Prediction withheld")
-                st.caption(f"Latency: {res.timing_breakdown_ms.get('module_3_inference_ms', 0):.1f} ms")
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            # 4. Satellite Imagery & Spectral Matrix
-            st.markdown("---")
-            vcol1, vcol2 = st.columns([1, 2])
-            with vcol1:
-                st.markdown('<div class="voxel-card">', unsafe_allow_html=True)
-                st.markdown('<div class="voxel-card-header">SATELLITE RGB VISUALIZATION</div>', unsafe_allow_html=True)
-                if res.diagnostics.get("rgb_preview_path") and os.path.exists(res.diagnostics["rgb_preview_path"]):
-                    st.image(res.diagnostics["rgb_preview_path"], caption="Sentinel-2 L2A True-Color Composite (B04, B03, B02)", use_container_width=True)
-                else:
-                    st.info("RGB composite preview unavailable for this tile.")
-                st.caption("Calibrated Bottom-of-Atmosphere (BOA) Surface Reflectance scaled in [0.0, 1.0].")
                 st.markdown('</div>', unsafe_allow_html=True)
 
             with vcol2:
                 st.markdown('<div class="voxel-card">', unsafe_allow_html=True)
-                st.markdown('<div class="voxel-card-header">ACTIVE SPECTRAL MATRIX (SENTINEL-2 MSI)</div>', unsafe_allow_html=True)
+                st.markdown('<div class="voxel-card-header">SELECTED SPECTRAL CHANNELS (SENTINEL-2 MSI)</div>', unsafe_allow_html=True)
                 render_spectral_matrix(res.selected_bands)
+
                 if res.candidate_bwoa_bands:
-                    st.caption(f"⚡ **Live BWOA Candidate Bands:** `{', '.join(res.candidate_bwoa_bands)}` | **Model Verified Bands:** `{', '.join(res.selected_bands)}`")
+                    st.caption(f"⚡ **Live BWOA Candidate:** `{', '.join(res.candidate_bwoa_bands)}` | **Model Verified Bands:** `{', '.join(res.selected_bands)}` (Decoupled for Mathematical Integrity)")
                 else:
-                    st.caption("Active bands highlighted in electric cyan. Atmospheric Band 10 (Cirrus) permanently locked and refused.")
+                    st.caption("Active bands highlighted in blue. Atmospheric Cirrus (Band 10) is refused to preserve surface reflectance accuracy.")
+                
+                # Class Probability Distribution
+                if res.prediction and "all_probabilities" in res.prediction:
+                    st.markdown('<div style="margin-top: 12px; font-size: 0.82rem; font-weight: 600; color: #475569;">CLASS PROBABILITY DENSITY:</div>', unsafe_allow_html=True)
+                    for cls_name, p_val in res.prediction["all_probabilities"].items():
+                        st.progress(p_val / 100.0, text=f"{cls_name}: {p_val:.1f}%")
+
                 st.markdown('</div>', unsafe_allow_html=True)
 
-            # 5. Explainability & Semantic Vector Retrieval
-            if res.explainability or res.similar_terrain:
-                st.markdown("---")
-                exp_col, sim_col = st.columns(2)
+            # 4. Optional Advanced Diagnostics, Explainability & Verification
+            with st.expander("🔍 Detailed Pipeline Telemetry & Timing Breakdown", expanded=False):
+                t1, t2, t3, t4 = st.columns(4)
+                t1.metric("Stage 0 Compiler", f"{res.timing_breakdown_ms.get('stage_0_query_compilation_ms', 0):.1f} ms")
+                t2.metric("Module 1 Ingestion", f"{res.timing_breakdown_ms.get('module_1_ingestion_ms', 0):.1f} ms")
+                t3.metric("Module 2 BWOA", f"{res.timing_breakdown_ms.get('module_2_optimization_ms', 0):.1f} ms")
+                t4.metric("Module 3 FusionNet", f"{res.timing_breakdown_ms.get('module_3_inference_ms', 0):.1f} ms")
 
-                with exp_col:
-                    st.markdown('<div class="voxel-card">', unsafe_allow_html=True)
-                    st.markdown('<div class="voxel-card-header">PERMUTATION SHAP SPECTRAL IMPORTANCE</div>', unsafe_allow_html=True)
-                    if res.explainability and "top_contributing_bands" in res.explainability:
-                        top_bands = res.explainability["top_contributing_bands"]
-                        band_names = [b["name"] for b in top_bands]
-                        band_pcts = [b["percentage"] for b in top_bands]
+                st.write("**Resolved Geographic Contract:**")
+                st.json(res.resolved_location)
 
-                        if any(p > 0.0 for p in band_pcts):
-                            fig, ax = plt.subplots(figsize=(6, 3.2), dpi=150)
-                            y_pos = np.arange(len(band_names))
-                            ax.barh(y_pos, band_pcts, color="#00f0ff", align="center", edgecolor="#00f0ff", height=0.6)
-                            ax.set_yticks(y_pos)
-                            ax.set_yticklabels(band_names)
-                            ax.invert_yaxis()
-                            ax.set_xlabel("Relative Attribution (%)", fontsize=8)
-                            ax.set_title("Permutation SHAP Feature Attribution", fontsize=10, fontweight="bold")
-                            style_dark_space_figure(fig, ax)
-                            fig.tight_layout()
-                            st.pyplot(fig)
-                            plt.close(fig)
-                        else:
-                            st.info("SHAP Attributions: Prediction confidence invariant to spatial permutation across channels for this tile.")
+            if res.explainability and "top_contributing_bands" in res.explainability:
+                with st.expander("📈 Permutation SHAP Spectral Feature Attribution", expanded=True):
+                    top_bands = res.explainability["top_contributing_bands"]
+                    band_names = [b["name"] for b in top_bands]
+                    band_pcts = [b["percentage"] for b in top_bands]
+
+                    if any(p > 0.0 for p in band_pcts):
+                        fig, ax = plt.subplots(figsize=(7, 2.8), dpi=150)
+                        y_pos = np.arange(len(band_names))
+                        ax.barh(y_pos, band_pcts, color="#2563EB", align="center", edgecolor="#1D4ED8", height=0.55)
+                        ax.set_yticks(y_pos)
+                        ax.set_yticklabels(band_names)
+                        ax.invert_yaxis()
+                        ax.set_xlabel("Relative Sensitivity Attribution (%)")
+                        ax.set_title("Single-Tile Spatial Permutation SHAP Attribution")
+                        style_light_figure(fig, ax)
+                        fig.tight_layout()
+                        st.pyplot(fig)
+                        plt.close(fig)
                     else:
-                        st.info("SHAP attribution disabled in settings (saves CPU time).")
-                    st.markdown('</div>', unsafe_allow_html=True)
+                        st.info("Attribution: Prediction confidence is invariant to spatial pixel permutation across channels on this tile.")
 
-                with sim_col:
-                    st.markdown('<div class="voxel-card">', unsafe_allow_html=True)
-                    st.markdown('<div class="voxel-card-header">SEMANTIC TERRAIN MATCHES (FAISS)</div>', unsafe_allow_html=True)
-                    st.caption("ℹ️ **Reference Corpus Notice:** Matches retrieved from the EuroSAT multi-class benchmark corpus (32 scenes) to validate 1216-dim latent vector semantic coherence. Real Indian task inference is executed directly by the trained classification heads.")
-                    if res.similar_terrain:
-                        terrain_df = pd.DataFrame(res.similar_terrain)
-                        st.dataframe(terrain_df, use_container_width=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
+            if res.similar_terrain:
+                with st.expander("🌐 Semantic Terrain Nearest Neighbors (FAISS Vector Index)", expanded=False):
+                    st.caption("Reference Corpus: EuroSAT multi-class benchmark scenes indexed in 1216-dim latent vector space to evaluate representation coherence.")
+                    st.dataframe(pd.DataFrame(res.similar_terrain), use_container_width=True)
 
-            # 6. Result Contract JSON Viewer
-            with st.expander("📄 View Machine-Readable Result Contract (JSON)"):
+            with st.expander("📄 View Machine-Readable Result Contract (JSON)", expanded=False):
                 st.json(res.to_dict())
 
         else:
-            # Informative Ready State (NO large blank panel)
-            st.markdown('<div class="voxel-card">', unsafe_allow_html=True)
-            st.markdown('<div class="voxel-card-header">SYSTEM READY // PIPELINE BRIEFING</div>', unsafe_allow_html=True)
-            bcol1, bcol2, bcol3 = st.columns(3)
-            with bcol1:
-                st.write("**Preconfigured Queries:**")
-                st.markdown(
-                    """
-                    - `Loktak Lake, Manipur` (Waterbody)
-                    - `Jim Corbett, Uttarakhand` (Forest Cover)
-                    - `Chilika Lake, Odisha` (Waterbody)
-                    - `Western Ghats, Karnataka` (Forest Cover)
-                    """
-                )
-            with bcol2:
-                st.write("**Trained Model Checkpoints:**")
-                st.markdown(
-                    """
-                    - `Waterbody:` 6 Bands (B01, B03, B04, B06, B8A, B11) — 73.7% Test OA
-                    - `Forest Cover:` 5 Bands (B02, B04, B06, B11, B12) — 94.7% Test OA
-                    - `General Land Cover:` 6 Bands (EuroSAT Benchmark)
-                    """
-                )
-            with bcol3:
-                st.write("**Execution Flow:**")
-                st.markdown(
-                    """
-                    1. Geocode query location (OSM Nominatim)
-                    2. Query AWS Earth Search STAC for Sentinel-2 L2A scene
-                    3. Apply physics-guided BWOA channel selection
-                    4. Execute 1216-dim CNN-ViT FusionNet inference
-                    """
-                )
-            st.info("💡 Select a target query above and click **'EXECUTE ORBITAL PIPELINE'** to begin.")
-            st.markdown('</div>', unsafe_allow_html=True)
+            # Clean Research Briefing Card for Ready State
+            st.markdown(
+                """
+                <div class="voxel-card" style="margin-top: 14px;">
+                    <div class="voxel-card-header">SYSTEM READY · SCIENTIFIC BRIEFING</div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 10px;">
+                        <div>
+                            <div style="font-weight: 600; color: #0F172A; font-size: 0.90rem; margin-bottom: 4px;">Verified Test Targets</div>
+                            <ul style="color: #475569; font-size: 0.85rem; padding-left: 18px; margin: 0;">
+                                <li><code>Loktak Lake, Manipur</code> (Waterbody Classification)</li>
+                                <li><code>Jim Corbett, Uttarakhand</code> (Forest Cover Classification)</li>
+                                <li><code>Chilika Lake, Odisha</code> (Coastal Water Lagoon)</li>
+                                <li><code>Western Ghats, Karnataka</code> (Tropical Montane Forest)</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <div style="font-weight: 600; color: #0F172A; font-size: 0.90rem; margin-bottom: 4px;">Calibrated Model Checkpoints</div>
+                            <ul style="color: #475569; font-size: 0.85rem; padding-left: 18px; margin: 0;">
+                                <li><b>Waterbody:</b> 6 Bands (B01, B03, B04, B06, B8A, B11) — 73.7% Test OA</li>
+                                <li><b>Forest Cover:</b> 5 Bands (B02, B04, B06, B11, B12) — 94.7% Test OA</li>
+                                <li><b>Architecture:</b> Multimodal Hybrid FusionNet (CNN + ViT)</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <div style="font-weight: 600; color: #0F172A; font-size: 0.90rem; margin-bottom: 4px;">Standard Processing Pipeline</div>
+                            <ol style="color: #475569; font-size: 0.85rem; padding-left: 18px; margin: 0;">
+                                <li>Stage 0 Natural Language Query Geocoding</li>
+                                <li>Module 1 Sentinel-2 L2A STAC Acquisition</li>
+                                <li>Module 2 Physics Spectral Band Slicing</li>
+                                <li>Module 3 1216-dim FusionNet Inference</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     # =========================================================================
-    # SECTION 2: DATASET PROVENANCE & MODEL VERIFICATION HUB
+    # SECTION 2: RESEARCH & EVALUATION SECTION
     # =========================================================================
-    elif nav_selection == "🔬 02 // Provenance & Verification":
+    elif nav_selection == "📊 Research & Evaluation":
         render_operational_header(
-            "Scientific Dataset Provenance &amp; Verification Hub",
-            "Zero-Leakage Spatial Split Audit · Calibrated Sentinel-2 BOA Reflectance · Real Checkpoint Registry",
-            "MODULE 0 // DATA PROVENANCE"
+            "Scientific Provenance & Model Evaluation Hub",
+            "Zero-Leakage Spatial Split · Calibrated BOA Reflectance · Real Checkpoint Registry · Held-Out Test Metrics",
+            "RESEARCH & EVALUATION"
         )
 
-        st.subheader("1. Genuine Sentinel-2 Real-Data Foundation vs Synthetic Fixtures")
-        
-        prov_col1, prov_col2, prov_col3 = st.columns(3)
-        with prov_col1:
+        st.subheader("1. Genuine Sentinel-2 Indian Dataset vs Synthetic Fixtures")
+        pcol1, pcol2, pcol3 = st.columns(3)
+        with pcol1:
             st.markdown(
                 """
                 <div class="voxel-card">
-                    <div class="voxel-card-header" style="color: #6ee7b7;">🛰️ GENUINE SATELLITE DATASET</div>
-                    <ul style="color: #cbd5e1; font-size: 0.88rem; padding-left: 18px; margin: 0;">
+                    <div class="voxel-card-header" style="color: #059669;">🛰️ SENTINEL-2 L2A GROUND TRUTH</div>
+                    <ul style="color: #475569; font-size: 0.85rem; padding-left: 18px; margin: 0;">
                         <li><b>Source:</b> AWS Earth Search STAC (<code>sentinel-2-l2a</code>)</li>
-                        <li><b>Coverage:</b> 6 Indian geographic regions (Chilika, Western Ghats, Thar, Sardar Sarovar, Hirakud, Kaziranga)</li>
-                        <li><b>Scale:</b> 120 genuine calibrated 256×256 tiles</li>
-                        <li><b>Radiometric:</b> BOA Surface Reflectance <code>[0.0, 1.0]</code></li>
+                        <li><b>Geographies:</b> 6 Indian regions (Chilika, Western Ghats, Thar, Sardar Sarovar, Hirakud, Kaziranga)</li>
+                        <li><b>Tiles:</b> 120 calibrated 256×256 surface reflectance tiles</li>
+                        <li><b>Radiometry:</b> BOA Surface Reflectance <code>[0.0, 1.0]</code></li>
                     </ul>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-
-        with prov_col2:
+        with pcol2:
             st.markdown(
                 """
                 <div class="voxel-card">
-                    <div class="voxel-card-header" style="color: #6ee7b7;">🏷️ VERIFIED ESA WORLDCOVER LABELS</div>
-                    <ul style="color: #cbd5e1; font-size: 0.88rem; padding-left: 18px; margin: 0;">
-                        <li><b>Reference:</b> ESA WorldCover 2021 v200 (10m resolution)</li>
-                        <li><b>Spatial Alignment:</b> Nearest-neighbor raster reprojection to tile CRS</li>
+                    <div class="voxel-card-header" style="color: #059669;">🏷️ ESA WORLDCOVER REFERENCE</div>
+                    <ul style="color: #475569; font-size: 0.85rem; padding-left: 18px; margin: 0;">
+                        <li><b>Reference:</b> ESA WorldCover 2021 v200 (10m global raster)</li>
+                        <li><b>Alignment:</b> Raster reprojection to exact tile CRS & bounds</li>
                         <li><b>Thresholding:</b> Positive ≥ 10%, Negative ≤ 0.5%</li>
-                        <li><b>Quality:</b> Ambiguous boundary tiles dropped</li>
+                        <li><b>Quality:</b> Ambiguous boundary tiles filtered</li>
                     </ul>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-
-        with prov_col3:
+        with pcol3:
             st.markdown(
                 """
                 <div class="voxel-card">
-                    <div class="voxel-card-header" style="color: #6ee7b7;">🗺️ GEOGRAPHIC SEPARATION SPLIT</div>
-                    <ul style="color: #cbd5e1; font-size: 0.88rem; padding-left: 18px; margin: 0;">
+                    <div class="voxel-card-header" style="color: #059669;">🗺️ ZERO-LEAKAGE SPATIAL SPLIT</div>
+                    <ul style="color: #475569; font-size: 0.85rem; padding-left: 18px; margin: 0;">
                         <li><b>Train (68 tiles):</b> Kaziranga, Western Ghats, Thar, Sardar Sarovar</li>
-                        <li><b>Val (20 tiles):</b> Chilika Lagoon Coast</li>
+                        <li><b>Val (20 tiles):</b> Chilika Coastal Lagoon</li>
                         <li><b>Held-Out Test (19 tiles):</b> Hirakud Inland Reservoir</li>
-                        <li><b>Status:</b> Zero spatial overlap with training regions</li>
+                        <li><b>Integrity:</b> Zero tile overlap between train and test regions</li>
                     </ul>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-        st.caption("ℹ️ **Scientific Scope & Limitation:** Evaluated on the held-out Hirakud inland reservoir scene (19 tiles). While ensuring zero geographic overlap with training regions, it represents an initial experimental test set. Nationwide generalization requires ongoing multi-region expansion.")
+        st.caption("ℹ️ **Scientific Scope & Generalization Disclaimer:** Evaluated on a 19-tile held-out set from Hirakud inland reservoir. While ensuring strict geographic isolation from training regions, it represents an experimental benchmark; nationwide generalization across all agro-ecological zones requires ongoing multi-region expansion.")
 
-        # Visual Inspection Sheet
-        st.markdown("---")
-        st.subheader("2. Real Dataset Visual Inspection (RGB vs ESA WorldCover Ground Truth)")
+        # Ground Truth Visual Alignment Inspection Sheet
+        st.markdown("<hr style='margin: 18px 0; border: none; border-top: 1px solid #E2E8F0;'/>", unsafe_allow_html=True)
+        st.subheader("2. Ground Truth Visual Alignment (Sentinel-2 RGB vs ESA WorldCover)")
         label_check_img = PROJECT_ROOT / "results" / "label_check.png"
         if label_check_img.exists():
-            st.image(str(label_check_img), caption="Real Sentinel-2 L2A RGB vs ESA WorldCover 2021 v200 Ground Truth Maps across India", use_container_width=True)
+            st.image(str(label_check_img), caption="Sentinel-2 L2A RGB vs ESA WorldCover 2021 v200 Ground Truth Across India", use_container_width=True)
 
-        st.markdown("---")
-        st.subheader("3. Verified Checkpoint Registry & Training Metrics")
+        # Checkpoint Registry Table
+        st.markdown("<hr style='margin: 18px 0; border: none; border-top: 1px solid #E2E8F0;'/>", unsafe_allow_html=True)
+        st.subheader("3. Calibrated Checkpoint Registry & Performance Metrics")
 
         ckpt_summary = [
             {
-                "Task": "waterbody (REAL DATA)",
+                "Task": "Waterbody (REAL DATA)",
                 "Checkpoint Path": "checkpoints/real_waterbody/best_fusion_net.pth",
-                "Active Channels": "6 bands (B01, B03, B04, B06, B8A, B11)",
-                "Data Source": "Real Sentinel-2 L2A (India)",
-                "Best Epoch": 4,
-                "Val OA (%)": "90.00%",
-                "Val F1 (%)": "88.10%",
-                "Test OA (%)": "73.68%",
-                "Test Macro F1 (%)": "73.39%",
+                "Channels": "6 bands (B01, B03, B04, B06, B8A, B11)",
+                "Val OA": "90.00%",
+                "Val F1": "88.10%",
+                "Test OA": "73.68%",
+                "Test Macro F1": "73.39%",
                 "Water Recall": "100.00%",
-                "Non-water Precision": "100.00%",
-                "Scientific Status": "Verified Genuine Real Satellite Model",
+                "Status": "Verified Real Satellite Model",
             },
             {
-                "Task": "waterbody (Synthetic Mock)",
+                "Task": "Waterbody (Synthetic Mock)",
                 "Checkpoint Path": "checkpoints/waterbody/best_fusion_net.pth",
-                "Active Channels": "6 bands (B01, B03, B04, B06, B8A, B11)",
-                "Data Source": "Synthetic Uniform Noise",
-                "Best Epoch": 1,
-                "Val OA (%)": "50.00%",
-                "Val F1 (%)": "33.33%",
-                "Test OA (%)": "50.00%",
-                "Test Macro F1 (%)": "33.33%",
+                "Channels": "6 bands (B01, B03, B04, B06, B8A, B11)",
+                "Val OA": "50.00%",
+                "Val F1": "33.33%",
+                "Test OA": "50.00%",
+                "Test Macro F1": "33.33%",
                 "Water Recall": "100.00%",
-                "Non-water Precision": "50.00%",
-                "Scientific Status": "Engineering Test Fixture (Collapsed)",
+                "Status": "Engineering Test Fixture",
             },
             {
-                "Task": "forest_cover (REAL DATA)",
+                "Task": "Forest Cover (REAL DATA)",
                 "Checkpoint Path": "checkpoints/real_forest_cover/best_fusion_net.pth",
-                "Active Channels": "5 bands (B02, B04, B06, B11, B12)",
-                "Data Source": "Real Sentinel-2 L2A (India)",
-                "Best Epoch": 1,
-                "Val OA (%)": "66.67%",
-                "Val F1 (%)": "47.92%",
-                "Test OA (%)": "94.74%",
-                "Test Macro F1 (%)": "93.60%",
-                "Water/Forest Recall": "100.00%",
-                "Precision": "92.86% (Forest), 100% (Non-forest)",
-                "Scientific Status": "Verified Genuine Real Satellite Model (+26.3% OA vs Baseline)",
+                "Channels": "5 bands (B02, B04, B06, B11, B12)",
+                "Val OA": "66.67%",
+                "Val F1": "47.92%",
+                "Test OA": "94.74%",
+                "Test Macro F1": "93.60%",
+                "Forest Recall": "100.00%",
+                "Status": "Verified Real Satellite Model (+26.3% OA vs Baseline)",
             },
             {
-                "Task": "forest_cover (Synthetic Mock)",
+                "Task": "Forest Cover (Synthetic Mock)",
                 "Checkpoint Path": "checkpoints/forest_cover/best_fusion_net.pth",
-                "Active Channels": "5 bands (B02, B04, B06, B11, B12)",
-                "Data Source": "Synthetic Uniform Noise",
-                "Best Epoch": 1,
-                "Val OA (%)": "100.00%",
-                "Val F1 (%)": "100.00%",
-                "Test OA (%)": "100.00%",
-                "Test Macro F1 (%)": "100.00%",
-                "Water/Forest Recall": "N/A",
-                "Precision": "N/A",
-                "Scientific Status": "Engineering Test Fixture",
-            },
-            {
-                "Task": "land_cover (EuroSAT 10-Class Mock)",
-                "Checkpoint Path": "checkpoints/best_fusion_net.pth",
-                "Active Channels": "6 bands (B02, B03, B04, B08, B11, B12)",
-                "Data Source": "Synthetic Mock",
-                "Best Epoch": 1,
-                "Val OA (%)": "9.38%",
-                "Val F1 (%)": "1.71%",
-                "Test OA (%)": "3.12%",
-                "Test Macro F1 (%)": "0.67%",
-                "Water/Forest Recall": "N/A",
-                "Precision": "N/A",
-                "Scientific Status": "Engineering Test Fixture",
+                "Channels": "5 bands (B02, B04, B06, B11, B12)",
+                "Val OA": "100.00%",
+                "Val F1": "100.00%",
+                "Test OA": "100.00%",
+                "Test Macro F1": "100.00%",
+                "Forest Recall": "N/A",
+                "Status": "Engineering Test Fixture",
             },
         ]
-
         st.dataframe(pd.DataFrame(ckpt_summary), use_container_width=True)
 
-        # Training Dynamics & Confusion Matrices
-        st.markdown("---")
+        # Training Dynamics Curves & Confusion Matrices
+        st.markdown("<hr style='margin: 18px 0; border: none; border-top: 1px solid #E2E8F0;'/>", unsafe_allow_html=True)
         st.subheader("4. Real-Data Training Dynamics & Held-Out Test Confusion Matrices")
         tcol1, tcol2 = st.columns(2)
 
         with tcol1:
             st.markdown('<div class="voxel-card">', unsafe_allow_html=True)
-            st.markdown('<div class="voxel-card-header">REAL WATERBODY EVALUATION (HELD-OUT HIRAKUD)</div>', unsafe_allow_html=True)
+            st.markdown('<div class="voxel-card-header">REAL WATERBODY EVALUATION (HIRAKUD TEST SET)</div>', unsafe_allow_html=True)
             real_wb_cm = PROJECT_ROOT / "results" / "real_waterbody_eval" / "confusion_matrix.png"
             if real_wb_cm.exists():
                 st.image(str(real_wb_cm), caption="Held-Out Hirakud Confusion Matrix (OA: 73.68%, Macro-F1: 73.39%, Water Recall: 100%)", use_container_width=True)
             
             real_wb_log = PROJECT_ROOT / "results" / "real_waterbody_training_log.csv"
             if real_wb_log.exists():
-                fig_wb = plot_dark_training_curve(real_wb_log, "Real Waterbody Training Progression")
+                fig_wb = plot_light_training_curve(real_wb_log, "Real Waterbody Training Progression")
                 if fig_wb:
                     st.pyplot(fig_wb)
                     plt.close(fig_wb)
@@ -665,41 +597,129 @@ def render_dashboard():
 
         with tcol2:
             st.markdown('<div class="voxel-card">', unsafe_allow_html=True)
-            st.markdown('<div class="voxel-card-header">REAL FOREST COVER EVALUATION (HELD-OUT HIRAKUD)</div>', unsafe_allow_html=True)
+            st.markdown('<div class="voxel-card-header">REAL FOREST COVER EVALUATION (HIRAKUD TEST SET)</div>', unsafe_allow_html=True)
             real_fc_cm = PROJECT_ROOT / "results" / "real_forest_cover_eval" / "confusion_matrix.png"
             if real_fc_cm.exists():
                 st.image(str(real_fc_cm), caption="Held-Out Hirakud Confusion Matrix (OA: 94.74%, Macro-F1: 93.60%, Forest Recall: 100%)", use_container_width=True)
                 
             real_fc_log = PROJECT_ROOT / "results" / "real_forest_cover_training_log.csv"
             if real_fc_log.exists():
-                fig_fc = plot_dark_training_curve(real_fc_log, "Real Forest Cover Training Progression")
+                fig_fc = plot_light_training_curve(real_fc_log, "Real Forest Cover Training Progression")
                 if fig_fc:
                     st.pyplot(fig_fc)
                     plt.close(fig_fc)
             st.markdown('</div>', unsafe_allow_html=True)
 
     # =========================================================================
-    # SECTION 3: MODULE 1 INGESTION & SIGNAL PROCESSING
+    # SECTION 3: MODULE 2 SPECTRAL BAND OPTIMIZATION
     # =========================================================================
-    elif nav_selection == "📡 03 // Module 1: Ingestion":
+    elif nav_selection == "⚡ Spectral Optimization (Module 2)":
         render_operational_header(
-            "Satellite Ingestion &amp; Radiometric Signal Processing",
-            "Direct Ingestion · 256×256 Spatial Tiling · 2D DWT Wavelet Decomposition · Calibrated BOA Reflectance",
+            "Physics-Guided Spectral Band Optimization (BWOA)",
+            "Task-Adaptive Down-Selection · Binary Whale Optimization · Physical Domain Balance & Cirrus Refusal",
+            "MODULE 2 // SPECTRAL OPTIMIZATION"
+        )
+
+        mask_files = {
+            "Waterbody Mask (6 Bands)": "checkpoints/masks/waterbody_mask.json",
+            "Forest Cover Mask (5 Bands)": "checkpoints/masks/forest_cover_mask.json",
+        }
+
+        st.markdown('<div class="voxel-card">', unsafe_allow_html=True)
+        selected_mask_name = st.selectbox("Inspect Calibrated Task Mask:", list(mask_files.keys()))
+        mask_rel_path = mask_files[selected_mask_name]
+        mask_full_path = PROJECT_ROOT / mask_rel_path
+
+        if mask_full_path.exists():
+            with open(mask_full_path, "r", encoding="utf-8") as f:
+                mask_data = json.load(f)
+
+            mcol1, mcol2 = st.columns([1, 1])
+            with mcol1:
+                st.markdown('<div class="voxel-card-header">BAND MASK SPECIFICATIONS</div>', unsafe_allow_html=True)
+                st.write(f"**Optimization Method:** `{mask_data.get('method', 'BWOA')}`")
+                st.write(f"**Active Channels:** `{len(mask_data.get('selected_indices', []))} / {mask_data.get('total_bands', 13)}`")
+                st.write(f"**Data Volume Reduction:** `{((13 - len(mask_data.get('selected_indices', []))) / 13) * 100:.1f}%`")
+                st.write(f"**Selected Bands:** `{mask_data.get('selected_bands')}`")
+                st.write(f"**Band Indices:** `{mask_data.get('selected_indices')}`")
+
+            with mcol2:
+                st.markdown('<div class="voxel-card-header">CHANNEL SELECTION HEATMAP</div>', unsafe_allow_html=True)
+                active_indices = mask_data.get("selected_indices", [])
+                binary_vector = [1 if i in active_indices else 0 for i in range(13)]
+
+                fig, ax = plt.subplots(figsize=(8, 1.8), dpi=150)
+                colors = ["#2563EB" if v == 1 else "#E2E8F0" for v in binary_vector]
+                ax.bar(range(13), [1]*13, color=colors, edgecolor="#CBD5E1", width=0.75)
+                ax.set_xticks(range(13))
+                ax.set_xticklabels(SENTINEL2_BAND_KEYS, fontsize=8.5)
+                ax.set_yticks([])
+                ax.set_title(f"Channel Allocation ({len(active_indices)}/13 Active)")
+
+                for idx, val in enumerate(binary_vector):
+                    ax.text(idx, 0.5, "ON" if val == 1 else "OFF", ha="center", va="center",
+                            color="#FFFFFF" if val == 1 else "#64748B", fontweight="bold", fontsize=7.5)
+
+                style_light_figure(fig, ax)
+                fig.tight_layout()
+                st.pyplot(fig)
+                plt.close(fig)
+
+            st.markdown('<div style="margin-top: 14px;"></div>', unsafe_allow_html=True)
+            st.markdown("#### Electromagnetic Regime Allocation")
+            render_spectral_matrix(mask_data.get("selected_bands", []))
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        with st.expander("🧪 Live BWOA Metaheuristic Search Sandbox", expanded=False):
+            st.markdown("Execute a fresh Binary Whale Optimization run on simulated multi-spectral tensor:")
+            bcol1, bcol2 = st.columns(2)
+            with bcol1:
+                live_target_bands = st.slider("Target Band Count:", min_value=3, max_value=8, value=5)
+                live_whales = st.slider("Whale Population (Agents):", min_value=5, max_value=25, value=10)
+            with bcol2:
+                live_iters = st.slider("Max Iterations:", min_value=3, max_value=20, value=5)
+                live_seed = st.number_input("Random Seed:", value=42)
+
+            if st.button("Run Live BWOA Search"):
+                with st.spinner("Executing Binary Whale Optimization Algorithm..."):
+                    from module2_optimization.orchestrator import run_module2_optimization
+                    sample_tensor = np.random.RandomState(live_seed).uniform(0.05, 0.6, (256, 256, 13))
+                    mask_arr, sel_indices, opt_metrics = run_module2_optimization(
+                        input_tensor=sample_tensor,
+                        target_count=live_target_bands,
+                        num_whales=live_whales,
+                        max_iter=live_iters,
+                        seed=live_seed,
+                    )
+                    sel_band_names = [SENTINEL2_BAND_KEYS[i] for i in sel_indices if i < len(SENTINEL2_BAND_KEYS)]
+                    st.success(f"BWOA Search Completed in {opt_metrics.get('optimization_time_ms', 0):.1f} ms")
+                    st.write(f"**Discovered Candidate Bands ({len(sel_indices)}):** `{', '.join(sel_band_names)}`")
+                    st.write(f"**Data Volume Reduction:** `{((13 - len(sel_indices)) / 13) * 100:.1f}%`")
+                    st.json(opt_metrics)
+
+    # =========================================================================
+    # SECTION 4: MODULE 1 INGESTION & SIGNAL PROCESSING
+    # =========================================================================
+    elif nav_selection == "📡 Satellite Ingestion (Module 1)":
+        render_operational_header(
+            "Satellite Ingestion & Radiometric Processing",
+            "Direct Ingestion · 256×256 Spatial Tiling · BOA Radiometric Calibration · 3D DWT Wavelets",
             "MODULE 1 // SATELLITE INGESTION"
         )
 
         st.markdown('<div class="voxel-card">', unsafe_allow_html=True)
-        m1_mode = st.radio("Select Processing Mode", ["Local Directory / Upload", "Evaluation Region (Ext SR / Ext WB)"], key="m1_radio")
+        m1_mode = st.radio("Select Processing Mode:", ["Evaluation Region (Ext SR / Ext WB)", "Local Directory / Upload"], key="m1_radio")
 
         if m1_mode == "Local Directory / Upload":
             uploaded_file = st.file_uploader("Upload a ZIP file containing Sentinel-2 L2A band GeoTIFFs (.tif or .jp2)", type="zip", key="m1_zip_uploader")
             if uploaded_file and st.button("Run Module 1 Processing", key="m1_run_btn"):
-                with st.spinner("Extracting uploaded file and processing..."):
+                with st.spinner("Extracting uploaded archive and processing..."):
                     with tempfile.TemporaryDirectory() as tmpdir:
                         zip_path = Path(tmpdir) / "upload.zip"
                         with open(zip_path, "wb") as f:
                             f.write(uploaded_file.read())
-                            
+
                         extract_dir = Path(tmpdir) / "extracted"
                         extract_dir.mkdir()
                         try:
@@ -708,13 +728,13 @@ def render_dashboard():
                         except zipfile.BadZipFile:
                             st.error("Uploaded file is not a valid ZIP archive.")
                             st.stop()
-                            
+
                         band_paths = {}
                         for b in SENTINEL_2_L2A_SPECTRAL_BANDS:
                             matches = list(extract_dir.rglob(f"*{b}*.*"))
                             if matches:
                                 band_paths[b] = str(matches[0])
-                                
+
                         if not band_paths:
                             st.error("No valid Sentinel-2 bands found in the uploaded ZIP file.")
                         else:
@@ -722,9 +742,14 @@ def render_dashboard():
                             process_bands(band_paths)
 
         elif m1_mode == "Evaluation Region (Ext SR / Ext WB)":
-            region_id = st.selectbox("Select Region", list(EVALUATION_REGIONS.keys()), format_func=lambda x: EVALUATION_REGIONS[x].display_name, key="m1_region_select")
-            eval_input_dir = st.text_input("Local Source Directory Path for Evaluation Region (Optional)", "", key="m1_eval_dir")
-            
+            region_id = st.selectbox(
+                "Select Region:",
+                list(EVALUATION_REGIONS.keys()),
+                format_func=lambda x: EVALUATION_REGIONS[x].display_name,
+                key="m1_region_select"
+            )
+            eval_input_dir = st.text_input("Local Source Directory Path for Evaluation Region (Optional):", "", key="m1_eval_dir")
+
             if st.button("Run Module 1 Evaluation Processing", key="m1_eval_btn"):
                 try:
                     eval_pipeline = EvaluationPipeline(region_id)
@@ -738,7 +763,7 @@ def render_dashboard():
                                 matches = list(input_dir.rglob(f"*{b}*.*"))
                                 if matches:
                                     band_paths[b] = str(matches[0])
-                                    
+
                             if not band_paths:
                                 st.error("No valid Sentinel-2 bands found in the provided directory.")
                             else:
@@ -752,145 +777,40 @@ def render_dashboard():
                     st.error(f"Evaluation failed: {str(e)}")
                     with st.expander("Technical Details"):
                         st.code(traceback.format_exc())
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    # =========================================================================
-    # SECTION 4: MODULE 2 SPECTRAL BAND OPTIMIZATION
-    # =========================================================================
-    elif nav_selection == "⚡ 04 // Module 2: BWOA Optimization":
-        render_operational_header(
-            "Physics-Guided Spectral Band Optimization (BWOA)",
-            "Task-Adaptive Down-Selection · Binary Whale Optimization · Domain Balance & Atmospheric Band Refusal",
-            "MODULE 2 // SPECTRAL OPTIMIZATION"
-        )
-
-        mask_files = {
-            "Waterbody Mask (6 Bands)": "checkpoints/masks/waterbody_mask.json",
-            "Forest Cover Mask (5 Bands)": "checkpoints/masks/forest_cover_mask.json",
-            "Drought Mask (4 Bands)": "checkpoints/masks/drought_mask.json",
-            "Rainfall Mask (5 Bands)": "checkpoints/masks/rainfall_mask.json",
-        }
-
-        st.markdown('<div class="voxel-card">', unsafe_allow_html=True)
-        selected_mask_name = st.selectbox("Select Task Mask to Inspect:", list(mask_files.keys()))
-        mask_rel_path = mask_files[selected_mask_name]
-        mask_full_path = PROJECT_ROOT / mask_rel_path
-
-        if mask_full_path.exists():
-            with open(mask_full_path, "r", encoding="utf-8") as f:
-                mask_data = json.load(f)
-
-            mcol1, mcol2 = st.columns([1, 1])
-            with mcol1:
-                st.subheader("Band Mask Specifications")
-                st.write(f"**Optimization Method:** `{mask_data.get('method', 'BWOA')}`")
-                st.write(f"**Active Band Count:** `{len(mask_data.get('selected_indices', []))} / {mask_data.get('total_bands', 13)}`")
-                st.write(f"**Theoretical Volume Reduction:** `{((13 - len(mask_data.get('selected_indices', []))) / 13) * 100:.1f}%`")
-                st.write(f"**Selected Channels:** `{mask_data.get('selected_bands')}`")
-                st.write(f"**Band Indices:** `{mask_data.get('selected_indices')}`")
-
-            with mcol2:
-                st.subheader("Channel Selection Heatmap")
-                active_indices = mask_data.get("selected_indices", [])
-                binary_vector = [1 if i in active_indices else 0 for i in range(13)]
-                
-                fig, ax = plt.subplots(figsize=(8, 1.8), dpi=150)
-                colors = ["#00f0ff" if v == 1 else "#1e293b" for v in binary_vector]
-                ax.bar(range(13), [1]*13, color=colors, edgecolor="#00f0ff", width=0.8)
-                ax.set_xticks(range(13))
-                ax.set_xticklabels(SENTINEL2_BAND_KEYS, fontsize=9)
-                ax.set_yticks([])
-                ax.set_title(f"Active Channels ({len(active_indices)}/13 Active)", fontsize=10, fontweight="bold")
-                
-                for idx, val in enumerate(binary_vector):
-                    ax.text(idx, 0.5, "ON" if val == 1 else "OFF", ha="center", va="center", 
-                            color="#030712" if val == 1 else "#64748b", fontweight="bold", fontsize=8)
-                
-                style_dark_space_figure(fig, ax)
-                fig.tight_layout()
-                st.pyplot(fig)
-                plt.close(fig)
-
-            st.markdown('<div style="margin-top: 14px;"></div>', unsafe_allow_html=True)
-            st.markdown("#### Electromagnetic Regime Allocation")
-            render_spectral_matrix(mask_data.get("selected_bands", []))
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Scientific Gating Callout
-        st.markdown(
-            """
-            <div class="voxel-card" style="border-color: rgba(56, 189, 248, 0.3); background: rgba(56, 189, 248, 0.05); margin-top: 14px;">
-                <div class="voxel-card-header" style="color: #38bdf8;">ℹ️ SCIENTIFIC GATING NOTE</div>
-                <div style="color: #cbd5e1; font-size: 0.88rem; line-height: 1.55;">
-                    BWOA performs spectral channel down-selection to minimize telemetry data volume (53.8% to 69.2% band reduction) 
-                    while enforcing physical domain balance (Visible, Red Edge, NIR, SWIR) and refusing atmospheric absorption bands (Band 10 Cirrus). 
-                    VOXEL treats BWOA strictly as a data-volume reduction mechanism; claims of empirical accuracy improvements over all-band models 
-                    remain gated pending controlled ablations.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        with st.expander("🧪 Run Live BWOA Metaheuristic Search (Fresh Optimization Sandbox)"):
-            st.markdown("Execute a fresh Binary Whale Optimization run with custom population, iterations, and target band constraints:")
-            bcol1, bcol2 = st.columns(2)
-            with bcol1:
-                live_target_bands = st.slider("Target Band Count:", min_value=3, max_value=8, value=5)
-                live_whales = st.slider("Whale Population (Agents):", min_value=5, max_value=25, value=10)
-            with bcol2:
-                live_iters = st.slider("Max Iterations:", min_value=3, max_value=20, value=5)
-                live_seed = st.number_input("Random Seed:", value=42)
-
-            if st.button("Run Live BWOA Search"):
-                with st.spinner("Executing Binary Whale Optimization Algorithm..."):
-                    from module2_optimization.bwoa_optimizer import run_module2_optimization
-                    sample_tensor = np.random.RandomState(live_seed).uniform(0.05, 0.6, (256, 256, 13))
-                    mask_arr, sel_indices, opt_metrics = run_module2_optimization(
-                        input_tensor=sample_tensor,
-                        target_count=live_target_bands,
-                        num_whales=live_whales,
-                        max_iter=live_iters,
-                        seed=live_seed,
-                    )
-                    sel_band_names = [SENTINEL2_BAND_KEYS[i] for i in sel_indices if i < len(SENTINEL2_BAND_KEYS)]
-                    st.success(f"Fresh BWOA Run Completed in {opt_metrics.get('optimization_time_ms', 0):.1f} ms!")
-                    st.write(f"**Selected Candidate Bands ({len(sel_indices)}):** `{', '.join(sel_band_names)}`")
-                    st.write(f"**Theoretical Volume Reduction:** `{((13 - len(sel_indices)) / 13) * 100:.1f}%`")
-                    st.json(opt_metrics)
-
     # =========================================================================
-    # SECTION 5: MODULE 3 DEEP LEARNING & EXPLAINABILITY
+    # SECTION 5: MODULE 3 DEEP ARCHITECTURE & LATENT RETRIEVAL
     # =========================================================================
-    elif nav_selection == "🧠 05 // Module 3: Deep Learning":
+    elif nav_selection == "🧠 Deep Architecture (Module 3)":
         render_operational_header(
-            "Deep Learning, Explainability &amp; Latent Retrieval",
-            "Hybrid CNN-ViT FusionNet · Permutation SHAP Attributions · 1216-dim FAISS Latent Vector Space",
+            "Deep Learning Architecture & Latent Retrieval",
+            "Hybrid CNN-ViT FusionNet · Permutation SHAP Channel Attributions · 1216-dim FAISS Latent Vector Space",
             "MODULE 3 // DEEP LEARNING"
         )
 
-        st.subheader("1. Architecture Specification")
+        st.subheader("1. FusionNet Architecture Specification")
         st.markdown(
             """
             <div class="voxel-card">
-                <div class="voxel-card-header">FUSIONNET HYBRID ARCHITECTURE (1216-DIMENSIONAL EMBEDDING)</div>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 10px;">
-                    <div style="background: rgba(0, 240, 255, 0.05); border: 1px solid rgba(0, 240, 255, 0.2); border-radius: 8px; padding: 12px;">
-                        <div style="font-family: var(--font-display); font-size: 1.05rem; color: #ffffff;">CNN Branch</div>
-                        <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 4px;">XNANet deep convolutional backbone delivering 1024-dimensional local texture and edge representations.</div>
+                <div class="voxel-card-header">FUSIONNET DUAL-BRANCH NEURAL TOPOLOGY</div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 10px;">
+                    <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 14px;">
+                        <div style="font-weight: 700; color: #0F172A; font-size: 0.95rem;">CNN Backbone (1024-dim)</div>
+                        <div style="color: #475569; font-size: 0.84rem; margin-top: 4px;">XNANet deep convolutional feature extractor capturing high-resolution spatial edges and local terrain textures.</div>
                     </div>
-                    <div style="background: rgba(59, 130, 246, 0.05); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 8px; padding: 12px;">
-                        <div style="font-family: var(--font-display); font-size: 1.05rem; color: #ffffff;">ViT Branch</div>
-                        <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 4px;">Tiny-32 Vision Transformer with multi-head self-attention extracting 192-dimensional global spatial context.</div>
+                    <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 14px;">
+                        <div style="font-weight: 700; color: #0F172A; font-size: 0.95rem;">ViT Transformer (192-dim)</div>
+                        <div style="color: #475569; font-size: 0.84rem; margin-top: 4px;">Tiny-32 Vision Transformer with multi-head self-attention extracting global spatial-spectral context.</div>
                     </div>
-                    <div style="background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 8px; padding: 12px;">
-                        <div style="font-family: var(--font-display); font-size: 1.05rem; color: #ffffff;">Fusion Head</div>
-                        <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 4px;">Direct concatenation yielding 1216-dimensional joint spatial-spectral representation vectors.</div>
+                    <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 14px;">
+                        <div style="font-weight: 700; color: #0F172A; font-size: 0.95rem;">Joint Embedding (1216-dim)</div>
+                        <div style="color: #475569; font-size: 0.84rem; margin-top: 4px;">Linear projection concat head combining spatial and spectral vectors for classification and FAISS retrieval.</div>
                     </div>
-                    <div style="background: rgba(168, 85, 247, 0.05); border: 1px solid rgba(168, 85, 247, 0.2); border-radius: 8px; padding: 12px;">
-                        <div style="font-family: var(--font-display); font-size: 1.05rem; color: #ffffff;">Dynamic Slicing</div>
-                        <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 4px;">Channels routed dynamically matching calibrated Module 2 masks without dynamic Conv layer re-instantiation.</div>
+                    <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 14px;">
+                        <div style="font-weight: 700; color: #0F172A; font-size: 0.95rem;">Dynamic Spectral Slicing</div>
+                        <div style="color: #475569; font-size: 0.84rem; margin-top: 4px;">Channels routed dynamically matching calibrated Module 2 masks without dynamic Conv re-instantiation.</div>
                     </div>
                 </div>
             </div>
@@ -898,30 +818,30 @@ def render_dashboard():
             unsafe_allow_html=True,
         )
 
-        st.markdown("---")
-        st.subheader("2. Global Explainability Artifacts")
+        st.markdown("<hr style='margin: 18px 0; border: none; border-top: 1px solid #E2E8F0;'/>", unsafe_allow_html=True)
+        st.subheader("2. Global Spectral Importance Artifact")
         shap_img_path = PROJECT_ROOT / "checkpoints" / "shap_band_importance.png"
         if shap_img_path.exists():
-            st.image(str(shap_img_path), caption="Permutation SHAP Band Importance (Global Attribution from EuroSAT Benchmark Pretraining - For live per-tile attribution, see Orchestrator)", use_container_width=True)
+            st.image(str(shap_img_path), caption="Global Permutation SHAP Band Importance (EuroSAT Pretraining Benchmark)", use_container_width=True)
         else:
             st.info("SHAP plot artifact not yet generated in checkpoints directory.")
 
-        st.markdown("---")
-        st.subheader("3. Semantic Vector Database Status")
+        st.markdown("<hr style='margin: 18px 0; border: none; border-top: 1px solid #E2E8F0;'/>", unsafe_allow_html=True)
+        st.subheader("3. Semantic Latent Vector Space (FAISS)")
         faiss_path = PROJECT_ROOT / "checkpoints" / "terrain_index.faiss"
         faiss_meta_path = PROJECT_ROOT / "checkpoints" / "terrain_index.faiss.meta.json"
 
         if faiss_path.exists() and faiss_meta_path.exists():
             with open(faiss_meta_path, "r", encoding="utf-8") as f:
                 meta_entries = json.load(f)
-            
+
             st.markdown(
                 f"""
                 <div class="voxel-card">
                     <span class="voxel-badge-success">FAISS INDEX ONLINE</span>
-                    <h3 style="margin-top: 6px; color: #ffffff;">{len(meta_entries)} Reference Scenes Indexed</h3>
-                    <p style="color: #94a3b8; font-size: 0.88rem; margin: 0;">
-                        1216-dimensional latent space indexing EuroSAT multi-class reference benchmark terrain scenes. Real task inference (Waterbody / Forest Cover) is executed directly by the trained classification heads.
+                    <h3 style="margin-top: 6px; color: #0F172A;">{len(meta_entries)} Reference Scenes Indexed</h3>
+                    <p style="color: #475569; font-size: 0.88rem; margin: 0;">
+                        1216-dimensional latent space indexing EuroSAT multi-class reference benchmark terrain scenes. Real Indian task inference (Waterbody / Forest Cover) is executed directly by the trained classification heads.
                     </p>
                 </div>
                 """,
@@ -930,7 +850,7 @@ def render_dashboard():
             with st.expander("View Indexed Scene Metadata"):
                 st.dataframe(pd.DataFrame(meta_entries), use_container_width=True)
         else:
-            st.info("FAISS vector index not yet generated in checkpoints directory.")
+            st.info("FAISS vector index file not found in checkpoints directory.")
 
 
 # Trigger UI rendering if running under real Streamlit
