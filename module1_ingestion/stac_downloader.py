@@ -297,10 +297,15 @@ class EarthSearchSTACProvider(STACProvider):
 
                             # Standard model tile size in meters: 256 px at 10m GSD = 2560m
                             tile_m = 2560.0
-                            # Minimal 1.0m numerical tolerance absorbs sub-pixel/float discretization
-                            # while strictly guaranteeing that any AOI > 2560m receives >= 2 tiles (0% undercoverage)
-                            tiles_x = max(1, int(math.ceil((gw_geo - 1.0) / tile_m)))
-                            tiles_y = max(1, int(math.ceil((gh_geo - 1.0) / tile_m)))
+                            pixel_size_m = 10.0
+
+                            # In a georeferenced raster grid at 10m GSD, partial pixel intersections
+                            # require expanding to the next full pixel boundary (ceil(extent / 10.0)).
+                            # Multi-tile allocation requires covering all intersected pixels without discarding border pixels.
+                            req_px_w = math.ceil(round(gw_geo, 2) / pixel_size_m)
+                            req_px_h = math.ceil(round(gh_geo, 2) / pixel_size_m)
+                            tiles_x = max(1, math.ceil(req_px_w / 256))
+                            tiles_y = max(1, math.ceil(req_px_h / 256))
 
                             target_gw = tiles_x * tile_m
                             target_gh = tiles_y * tile_m

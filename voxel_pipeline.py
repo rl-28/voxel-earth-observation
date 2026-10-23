@@ -945,13 +945,19 @@ class VoxelPipeline:
             diagnostics["stac_item_id"] = s_id
             diagnostics["cache_status"] = mod1_meta.get("cache_status", "Unknown")
         else:
-            # Check if multi-tile is requested based on span
             from utils.llm_parser import calculate_geographic_span
             span_w_km, span_h_km = calculate_geographic_span(contract.bbox)
-            # Minimal 0.001 km (1.0m) numerical tolerance absorbs sub-pixel/float discretization
-            # while strictly guaranteeing that any AOI > 2.56 km receives >= 2 tiles (0% undercoverage)
-            tiles_x = max(1, int(math.ceil((span_w_km - 0.001) / 2.56)))
-            tiles_y = max(1, int(math.ceil((span_h_km - 0.001) / 2.56)))
+            gw_geo = span_w_km * 1000.0
+            gh_geo = span_h_km * 1000.0
+
+            # Tile allocation based on physical raster pixel-grid extents (10m GSD, 256 px tiles):
+            # An AOI of ground extent W intersects ceil(W / 10.0) pixels.
+            # Any dimension strictly exceeding 2560.0m intersects border pixels into the 257th pixel
+            # and allocates >= 2 tiles, guaranteeing 100% geometric containment without under-coverage.
+            req_px_w = math.ceil(round(gw_geo, 2) / 10.0)
+            req_px_h = math.ceil(round(gh_geo, 2) / 10.0)
+            tiles_x = max(1, math.ceil(req_px_w / 256))
+            tiles_y = max(1, math.ceil(req_px_h / 256))
             total_tiles = tiles_x * tiles_y
 
             if total_tiles > 1:

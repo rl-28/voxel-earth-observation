@@ -595,8 +595,12 @@ def render_dashboard():
                 unsafe_allow_html=True,
             )
         with hud_col3:
-            est_w = max(1, int(math.ceil((b_w_km - 0.05) / 2.56)))
-            est_h = max(1, int(math.ceil((b_h_km - 0.05) / 2.56)))
+            b_w_m = b_w_km * 1000.0
+            b_h_m = b_h_km * 1000.0
+            px_w = math.ceil(round(b_w_m, 2) / 10.0)
+            px_h = math.ceil(round(b_h_m, 2) / 10.0)
+            est_w = max(1, math.ceil(px_w / 256))
+            est_h = max(1, math.ceil(px_h / 256))
             est_tiles = est_w * est_h
             if aoi_exceeds_limit:
                 status_color = "#DC2626"

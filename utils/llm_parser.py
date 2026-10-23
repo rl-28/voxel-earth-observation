@@ -66,7 +66,9 @@ def calculate_geographic_span(bbox: List[float]) -> Tuple[float, float]:
 def compute_canonical_tile_bbox(lat: float, lon: float, tile_size_m: float = 2560.0) -> List[float]:
     """
     Computes exact WGS84 bounding box [min_lon, min_lat, max_lon, max_lat] centered at (lat, lon)
-    matching exactly tile_size_m x tile_size_m (canonical 2560m = 256 px at 10m Sentinel-2 GSD).
+    matching tile_size_m x tile_size_m (canonical 2560m = 256 px at 10m Sentinel-2 GSD).
+    Uses inbound rounding to ensure the physical ground footprint fits strictly within the single-tile limit
+    (<= 2560.0m) without discretization overflow into adjacent raster cells.
     """
     lat_rad = np.radians(lat)
     m_per_deg_lat = 111132.95 - 559.82 * np.cos(2 * lat_rad) + 1.175 * np.cos(4 * lat_rad)
@@ -74,12 +76,11 @@ def compute_canonical_tile_bbox(lat: float, lon: float, tile_size_m: float = 256
     half_m = tile_size_m / 2.0
     d_lat = half_m / m_per_deg_lat
     d_lon = half_m / m_per_deg_lon
-    return [
-        round(float(lon - d_lon), 6),
-        round(float(lat - d_lat), 6),
-        round(float(lon + d_lon), 6),
-        round(float(lat + d_lat), 6),
-    ]
+    min_lon = round(math.ceil((lon - d_lon) * 1e6) / 1e6, 6)
+    min_lat = round(math.ceil((lat - d_lat) * 1e6) / 1e6, 6)
+    max_lon = round(math.floor((lon + d_lon) * 1e6) / 1e6, 6)
+    max_lat = round(math.floor((lat + d_lat) * 1e6) / 1e6, 6)
+    return [min_lon, min_lat, max_lon, max_lat]
 
 # Task Profile Constants
 TASK_WATER = "WATER_MOISTURE"

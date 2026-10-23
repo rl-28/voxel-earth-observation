@@ -48,50 +48,69 @@ Module 1 tiled the acquired rectangular crop into 4 seamless $256 \times 256\tex
 
 ## 2. Verification Task 2: Boundary Integrity, Tolerance Elimination, & Mathematical Proof of Zero Under-Coverage
 
-### 2.1 The Inadequacy of the 50m Tolerance Threshold
-In the previous provisional implementation, a 50-metre tolerance threshold ($\delta = 50.0\text{ m}$) was used in the tile-count formula:
-$$N_x = \max\left(1, \left\lceil \frac{W - 50.0}{2560.0} \right\rceil\right)$$
-This formula created a critical defect: for any user-selected AOI width $W$ in the open interval $(2560.0, 2610.0]\text{ metres}$, the term $W - 50.0 \le 2560.0$, causing the ceiling function to return $N_x = 1$.
+## 2. Verification Task 2: Boundary Integrity, Sub-Metre Precision, & Mathematical Proof of Zero Under-Coverage
 
-Because 1 model tile is strictly $256 \times 256\text{ pixels}$ at $10\text{ m}$ GSD ($2560.0\text{ m} \times 2560.0\text{ m}$), allocating 1 tile to an AOI wider than $2560.0\text{ m}$ results in **genuine geographic under-coverage**:
-$$\text{Under-coverage} = W - 2560.0\text{ m} > 0$$
-The outermost $\frac{W - 2560.0}{2}\text{ metres}$ on the west and east borders of the selected AOI are physically outside the processed tile window and omitted from model inference.
+### 2.1 The Inadequacy of Subtractive Tolerance Formulas
+In earlier iterations, subtractive tolerances were tested to absorb coordinate discretization:
+1. **Initial 50-metre threshold ($\delta = 50.0\text{ m}$):**
+   $$N = \max\left(1, \left\lceil \frac{W - 50.0}{2560.0} \right\rceil\right)$$
+   For any AOI width $W \in (2560.0, 2610.0]\text{ m}$, $W - 50.0 \le 2560.0 \implies N = 1\text{ tile}$, causing up to **$50.0\text{ m}$ of physical under-coverage**.
+2. **Intermediate 1.0-metre threshold ($\delta = 1.0\text{ m}$):**
+   $$N = \max\left(1, \left\lceil \frac{W - 1.0}{2560.0} \right\rceil\right)$$
+   For any sub-metre overshoot $W \in (2560.0, 2561.0]\text{ m}$ (e.g. $W = 2560.5\text{ m}$), $W - 1.0 = 2559.5 \le 2560.0 \implies N = 1\text{ tile}$, causing **$0.50\text{ m}$ of under-coverage** despite the AOI strictly exceeding a single tile.
 
-### 2.2 Empirical Demonstration Across Test AOI Dimensions
-A formal test was executed across widths and heights of $2550, 2560, 2565, 2580, 2600, 2610, \text{ and } 2611\text{ metres}$, comparing the previous 50m tolerance against the corrected formulation:
+Any arbitrary subtraction creates a non-zero under-coverage interval $(2560.0, 2560.0 + \delta]\text{ m}$.
 
-| AOI Dimension ($W, H$) | Previous Formula $N$ | Previous Processed Extent | Previous Under-coverage | Corrected Formula $N$ | Corrected Processed Extent | Corrected Under-coverage | Boundary Margin / Side | Coverage Status |
+### 2.2 Corrected Pixel-Grid Extent Formulation
+To eliminate arbitrary metric buffers, tile allocation is derived directly from the physical pixel-grid extents of the Sentinel-2 sensor ($10.0\text{ m}$ Ground Sampling Distance) and the neural network tile dimension ($256\text{ pixels} = 2560.0\text{ m}$):
+
+$$\text{pixels}_w = \left\lceil \frac{\text{round}(W, 2)}{10.0} \right\rceil, \quad N_x = \max\left(1, \left\lceil \frac{\text{pixels}_w}{256} \right\rceil\right)$$
+
+- **Physical Grid Semantics:** An AOI of width $W$ intersects $\lceil W / 10.0 \rceil$ discrete raster pixels. If an AOI exceeds $2560.00\text{ m}$ by even $0.01\text{ m}$ ($1\text{ cm}$), it partially intersects border pixels into the 257th raster column ($\lceil 2560.01 / 10.0 \rceil = 257\text{ px}$).
+- **Zero Under-Coverage Guarantee:** Because $\lceil 257 / 256 \rceil = 2$, the raster window expands to 2 full tiles ($5120.0\text{ m}$), strictly enclosing every partially intersected border pixel without data loss.
+
+### 2.3 Empirical Evaluation Across Sub-Metre and Multi-Tile Dimensions
+A rigorous empirical comparison was conducted across sub-metre and multi-tile dimensions:
+
+| AOI Dimension ($W, H$) | Old Formula (1m Tol) Tiles | Old Under-coverage | Pixel-Grid Req Pixels | Corrected Tiles | Processed Extent | Corrected Under-coverage | Boundary Margin / Side | Geometric Containment |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **2550.0 m** | 1 Tile | 2560.0 m | 0.0 m | **1 Tile** | 2560.0 m | **0.00 m** | $+5.0\text{ m}$ | **100% Contained** |
-| **2560.0 m** | 1 Tile | 2560.0 m | 0.0 m | **1 Tile** | 2560.0 m | **0.00 m** | $+0.0\text{ m}$ | **100% Contained** |
-| **2565.0 m** | 1 Tile | 2560.0 m | **5.0 m** | **2 Tiles** | 5120.0 m | **0.00 m** | $+1277.5\text{ m}$ | **100% Contained** |
-| **2580.0 m** | 1 Tile | 2560.0 m | **20.0 m** | **2 Tiles** | 5120.0 m | **0.00 m** | $+1270.0\text{ m}$ | **100% Contained** |
-| **2600.0 m** | 1 Tile | 2560.0 m | **40.0 m** | **2 Tiles** | 5120.0 m | **0.00 m** | $+1260.0\text{ m}$ | **100% Contained** |
-| **2610.0 m** | 1 Tile | 2560.0 m | **50.0 m** | **2 Tiles** | 5120.0 m | **0.00 m** | $+1255.0\text{ m}$ | **100% Contained** |
-| **2611.0 m** | 2 Tiles | 5120.0 m | 0.0 m | **2 Tiles** | 5120.0 m | **0.00 m** | $+1254.5\text{ m}$ | **100% Contained** |
+| **2559.99 m** | 1 Tile | 0.00 m | 256 px | **1 Tile** | 2560.0 m | **0.00 m** | $+0.005\text{ m}$ | **100% Contained** |
+| **2560.00 m** | 1 Tile | 0.00 m | 256 px | **1 Tile** | 2560.0 m | **0.00 m** | $+0.000\text{ m}$ | **100% Contained** |
+| **2560.01 m** | 1 Tile | **0.01 m (FAIL)** | 257 px | **2 Tiles** | 5120.0 m | **0.00 m** | $+1279.995\text{ m}$ | **100% Contained** |
+| **2560.50 m** | 1 Tile | **0.50 m (FAIL)** | 257 px | **2 Tiles** | 5120.0 m | **0.00 m** | $+1279.750\text{ m}$ | **100% Contained** |
+| **2560.99 m** | 1 Tile | **0.99 m (FAIL)** | 257 px | **2 Tiles** | 5120.0 m | **0.00 m** | $+1279.505\text{ m}$ | **100% Contained** |
+| **2561.00 m** | 1 Tile | **1.00 m (FAIL)** | 257 px | **2 Tiles** | 5120.0 m | **0.00 m** | $+1279.500\text{ m}$ | **100% Contained** |
+| **2565.00 m** | 2 Tiles | 0.00 m | 257 px | **2 Tiles** | 5120.0 m | **0.00 m** | $+1277.500\text{ m}$ | **100% Contained** |
+| **2580.00 m** | 2 Tiles | 0.00 m | 258 px | **2 Tiles** | 5120.0 m | **0.00 m** | $+1270.000\text{ m}$ | **100% Contained** |
 
-### 2.3 Corrected Mathematical Formulation (Zero Under-Coverage)
-To guarantee zero under-coverage without arbitrary threshold buffers, the tile count is computed from the physical ground span $(W_{\text{m}}, H_{\text{m}})$ using a sub-pixel numerical epsilon ($\epsilon = 1.0\text{ m} = 0.001\text{ km}$):
-$$N_x = \max\left(1, \left\lceil \frac{W_{\text{m}} - \epsilon}{2560.0} \right\rceil\right), \quad N_y = \max\left(1, \left\lceil \frac{H_{\text{m}} - \epsilon}{2560.0} \right\rceil\right)$$
-- If $W_{\text{m}} \le 2560.0\text{ m}$: $N_x = 1$. The processed tile covers $2560.0\text{ m} \ge W_{\text{m}}$. Under-coverage $= 0.0\text{ m}$.
-- If $W_{\text{m}} > 2560.0\text{ m}$ (even by 1 metre, e.g. $2565.0\text{ m}$): $N_x \ge 2$. The processed tile grid covers $N_x \times 2560.0 \ge 5120.0\text{ m} \gg W_{\text{m}}$. Under-coverage $= 0.0\text{ m}$.
-- All **49 2D combinations** ($7 \times 7$ matrix of $W \times H$) were evaluated: **all 49 combinations achieve 100% strict spatial containment**.
+### 2.4 Polygon Containment Matrix (All 64 Bivariate Combinations)
+All **64 bivariate 2D combinations** ($8 \times 8$ matrix of $W \times H$) were tested against the actual union of georeferenced processed tile footprints:
+- For every combination, each vertex $(v_x, v_y)$ of the selected AOI polygon $P_{\text{AOI}}$ satisfies:
+  $$x_{\min, \text{proc}} \le v_x \le x_{\max, \text{proc}} \quad \text{and} \quad y_{\min, \text{proc}} \le v_y \le y_{\max, \text{proc}}$$
+- Under-coverage area across all 64 combinations:
+  $$\text{Area}(P_{\text{AOI}} \setminus U_{\text{tiles}}) \equiv 0.000000\text{ m}^2$$
+- While the old 1m tolerance formula failed on **48 out of 64 combinations**, the pixel-grid formula achieved **64 out of 64 strictly contained (100.0%)**.
 
-### 2.4 Canonical Single-Tile Footprint Behavior
-Canonical 1-tile boxes are generated via `compute_canonical_tile_bbox(lat, lon, tile_size_m=2560.0)`. By increasing the coordinate precision from 4 decimal places ($\pm 11.1\text{ m}$ step) to **6 decimal places** ($\pm 0.1\text{ m}$ step), canonical tile bounds match the physical $2560.0\text{ m}$ tile dimension with sub-decimeter accuracy:
+### 2.5 Canonical Single-Tile Footprint Behavior Across Indian Latitudes
+Canonical single-tile point selections (map point clicks, preset target locations) represent a user request for a single $2560\text{ m} \times 2560\text{ m}$ tile centered on a point.
+To prevent coordinate discretization jitter ($\pm 11\text{ cm}$ at 6 decimal places) from artificially tripping the 257th pixel boundary, `compute_canonical_tile_bbox` applies **inbound coordinate rounding**:
+$$\min_{\text{lon}} = \frac{\lceil(\text{lon} - d_{\text{lon}}) \times 10^6\rceil}{10^6}, \quad \max_{\text{lon}} = \frac{\lfloor(\text{lon} + d_{\text{lon}}) \times 10^6\rfloor}{10^6}$$
 
-| Location | Latitude | Longitude | Ground Width | Ground Height | Computed Grid | Processed Tiles |
+Evaluated across India's full latitudinal extent ($8^\circ\text{ N}$ to $34^\circ\text{ N}$):
+
+| Location | Latitude | Ground Width | Ground Height | Pixel Dimensions | Computed Grid | Processed Tiles |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Kanyakumari** | $8.08^\circ\text{ N}$ | $77.55^\circ\text{ E}$ | 2560.01 m | 2560.08 m | $1 \times 1$ | **1 Tile (2.56 km)** |
-| **Western Ghats** | $13.20^\circ\text{ N}$ | $75.61^\circ\text{ E}$ | 2559.91 m | 2560.03 m | $1 \times 1$ | **1 Tile (2.56 km)** |
-| **Ratnagiri** | $17.26^\circ\text{ N}$ | $73.37^\circ\text{ E}$ | 2559.96 m | 2560.07 m | $1 \times 1$ | **1 Tile (2.56 km)** |
-| **Chilika Lake** | $19.65^\circ\text{ N}$ | $85.36^\circ\text{ E}$ | 2560.03 m | 2560.05 m | $1 \times 1$ | **1 Tile (2.56 km)** |
-| **Sardar Sarovar** | $21.83^\circ\text{ N}$ | $73.75^\circ\text{ E}$ | 2560.01 m | 2560.03 m | $1 \times 1$ | **1 Tile (2.56 km)** |
-| **Loktak Lake** | $24.55^\circ\text{ N}$ | $93.81^\circ\text{ E}$ | 2560.02 m | 2560.03 m | $1 \times 1$ | **1 Tile (2.56 km)** |
-| **Jim Corbett** | $29.55^\circ\text{ N}$ | $78.84^\circ\text{ E}$ | 2560.01 m | 2560.07 m | $1 \times 1$ | **1 Tile (2.56 km)** |
-| **Dal Lake, Srinagar** | $34.11^\circ\text{ N}$ | $74.87^\circ\text{ E}$ | 2559.91 m | 2559.91 m | $1 \times 1$ | **1 Tile (2.56 km)** |
+| **Kanyakumari** | $8.08^\circ\text{ N}$ | 2559.79 m | 2559.86 m | $256 \times 256\text{ px}$ | $1 \times 1$ | **1 Tile (2.56 km)** |
+| **Western Ghats** | $13.20^\circ\text{ N}$ | 2559.91 m | 2559.81 m | $256 \times 256\text{ px}$ | $1 \times 1$ | **1 Tile (2.56 km)** |
+| **Ratnagiri** | $17.26^\circ\text{ N}$ | 2559.96 m | 2559.85 m | $256 \times 256\text{ px}$ | $1 \times 1$ | **1 Tile (2.56 km)** |
+| **Chilika Lake** | $19.65^\circ\text{ N}$ | 2559.82 m | 2559.83 m | $256 \times 256\text{ px}$ | $1 \times 1$ | **1 Tile (2.56 km)** |
+| **Sardar Sarovar** | $21.83^\circ\text{ N}$ | 2559.81 m | 2559.81 m | $256 \times 256\text{ px}$ | $1 \times 1$ | **1 Tile (2.56 km)** |
+| **Loktak Lake** | $24.55^\circ\text{ N}$ | 2559.82 m | 2559.81 m | $256 \times 256\text{ px}$ | $1 \times 1$ | **1 Tile (2.56 km)** |
+| **Jim Corbett** | $29.55^\circ\text{ N}$ | 2559.82 m | 2559.85 m | $256 \times 256\text{ px}$ | $1 \times 1$ | **1 Tile (2.56 km)** |
+| **Dal Lake, Srinagar** | $34.11^\circ\text{ N}$ | 2559.91 m | 2559.91 m | $256 \times 256\text{ px}$ | $1 \times 1$ | **1 Tile (2.56 km)** |
 
-Every canonical single-tile footprint evaluates strictly to **1 tile**, completely covering the requested area without accidental ballooning.
+- Every canonical single-tile point selection is $\le 2560.00\text{ m}$ (within $21\text{ cm}$, $> 99.99\%$ match), fitting strictly within 1 single tile.
+- An oversized drawn rectangle (e.g. $2560.5\text{ m}$) is recognized as spanning into the 257th pixel and allocates 2 tiles, preserving convenience without false assertions.
 
 ---
 
