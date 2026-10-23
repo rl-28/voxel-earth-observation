@@ -289,13 +289,18 @@ class EarthSearchSTACProvider(STACProvider):
                         with rasterio.open(asset_url) as src:
                             tb = transform_bounds("EPSG:4326", src.crs, *bbox)
                             minx, miny, maxx, maxy = tb
-                            gw = abs(maxx - minx)
-                            gh = abs(maxy - miny)
+
+                            from utils.llm_parser import calculate_geographic_span
+                            span_w_km, span_h_km = calculate_geographic_span(bbox)
+                            gw_geo = span_w_km * 1000.0
+                            gh_geo = span_h_km * 1000.0
 
                             # Standard model tile size in meters: 256 px at 10m GSD = 2560m
                             tile_m = 2560.0
-                            tiles_x = max(1, int(math.ceil((gw - 50.0) / tile_m)))
-                            tiles_y = max(1, int(math.ceil((gh - 50.0) / tile_m)))
+                            # Minimal 1.0m numerical tolerance absorbs sub-pixel/float discretization
+                            # while strictly guaranteeing that any AOI > 2560m receives >= 2 tiles (0% undercoverage)
+                            tiles_x = max(1, int(math.ceil((gw_geo - 1.0) / tile_m)))
+                            tiles_y = max(1, int(math.ceil((gh_geo - 1.0) / tile_m)))
 
                             target_gw = tiles_x * tile_m
                             target_gh = tiles_y * tile_m

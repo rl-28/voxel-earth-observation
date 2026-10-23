@@ -75,10 +75,10 @@ def compute_canonical_tile_bbox(lat: float, lon: float, tile_size_m: float = 256
     d_lat = half_m / m_per_deg_lat
     d_lon = half_m / m_per_deg_lon
     return [
-        round(float(lon - d_lon), 4),
-        round(float(lat - d_lat), 4),
-        round(float(lon + d_lon), 4),
-        round(float(lat + d_lat), 4),
+        round(float(lon - d_lon), 6),
+        round(float(lat - d_lat), 6),
+        round(float(lon + d_lon), 6),
+        round(float(lat + d_lat), 6),
     ]
 
 # Task Profile Constants
@@ -531,7 +531,7 @@ Return ONLY a valid raw JSON object matching this schema with NO markdown backti
 
         # Geocode to real BBOX coordinates (or use explicit bbox if provided)
         if bbox is not None:
-            bbox_coords = [round(float(x), 4) for x in bbox]
+            bbox_coords = [round(float(x), 6) for x in bbox]
             geocoder_used = "Interactive Map / Explicit BBOX Input"
             location_query = f"Custom AOI [{bbox_coords[0]:.4f}, {bbox_coords[1]:.4f}, {bbox_coords[2]:.4f}, {bbox_coords[3]:.4f}]"
         else:

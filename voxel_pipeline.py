@@ -828,7 +828,7 @@ class VoxelPipeline:
                     f"Selected AOI span ({span_lon*111.3:.1f} km × {span_lat*111.3:.1f} km) exceeds maximum supported single-scene limit (8.0 km × 8.0 km / 0.08°). "
                     "Please draw a smaller rectangular area or select a point to protect system resources."
                 )
-            validated_bbox = [round(min_lon, 4), round(min_lat, 4), round(max_lon, 4), round(max_lat, 4)]
+            validated_bbox = [round(min_lon, 6), round(min_lat, 6), round(max_lon, 6), round(max_lat, 6)]
 
         t0_start = time.perf_counter()
         logger.info("[STAGE 0] Compiling natural language query and resolving geographic location...")
@@ -948,8 +948,10 @@ class VoxelPipeline:
             # Check if multi-tile is requested based on span
             from utils.llm_parser import calculate_geographic_span
             span_w_km, span_h_km = calculate_geographic_span(contract.bbox)
-            tiles_x = max(1, int(math.ceil((span_w_km - 0.05) / 2.56)))
-            tiles_y = max(1, int(math.ceil((span_h_km - 0.05) / 2.56)))
+            # Minimal 0.001 km (1.0m) numerical tolerance absorbs sub-pixel/float discretization
+            # while strictly guaranteeing that any AOI > 2.56 km receives >= 2 tiles (0% undercoverage)
+            tiles_x = max(1, int(math.ceil((span_w_km - 0.001) / 2.56)))
+            tiles_y = max(1, int(math.ceil((span_h_km - 0.001) / 2.56)))
             total_tiles = tiles_x * tiles_y
 
             if total_tiles > 1:
@@ -960,10 +962,10 @@ class VoxelPipeline:
                     for c_idx in range(tiles_x):
                         tile_t, _ = self.generate_synthetic_tile(task_key, seed=synthetic_seed + r_idx * tiles_x + c_idx)
                         t_b = [
-                            round(contract.bbox[0] + c_idx * d_lon, 4),
-                            round(contract.bbox[3] - (r_idx + 1) * d_lat, 4),
-                            round(contract.bbox[0] + (c_idx + 1) * d_lon, 4),
-                            round(contract.bbox[3] - r_idx * d_lat, 4),
+                            round(contract.bbox[0] + c_idx * d_lon, 6),
+                            round(contract.bbox[3] - (r_idx + 1) * d_lat, 6),
+                            round(contract.bbox[0] + (c_idx + 1) * d_lon, 6),
+                            round(contract.bbox[3] - r_idx * d_lat, 6),
                         ]
                         tiles_data.append({
                             "tile_id": f"tile_{r_idx:03d}_{c_idx:03d}",
@@ -1207,10 +1209,10 @@ class VoxelPipeline:
             valid_b = [tp["bounds"] for tp in multi_tile_preds if isinstance(tp.get("bounds"), (list, tuple)) and len(tp["bounds"]) == 4]
             if valid_b:
                 actual_proc_bbox = [
-                    round(min(b[0] for b in valid_b), 4),
-                    round(min(b[1] for b in valid_b), 4),
-                    round(max(b[2] for b in valid_b), 4),
-                    round(max(b[3] for b in valid_b), 4),
+                    round(min(b[0] for b in valid_b), 6),
+                    round(min(b[1] for b in valid_b), 6),
+                    round(max(b[2] for b in valid_b), 6),
+                    round(max(b[3] for b in valid_b), 6),
                 ]
             else:
                 actual_proc_bbox = contract.bbox

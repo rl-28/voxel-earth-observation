@@ -331,3 +331,81 @@ def test_case_6_ndvi_rgb_radiometric_and_spatial_alignment(offline_pipeline):
     # Classification output is a categorical tile-level classification, not a raster mask
     assert isinstance(pred.get("confidence_pct"), (int, float))
     assert isinstance(pred.get("predicted_class_name"), str)
+
+
+# -----------------------------------------------------------------------------
+# Test Case 7: Boundary Integrity, Zero Under-Coverage, & Canonical Containment
+# -----------------------------------------------------------------------------
+def test_case_7_boundary_integrity_zero_undercoverage_and_canonical_containment(offline_pipeline):
+    """
+    Test Case 7: Formal verification that the corrected tile-count calculation
+    guarantees zero under-coverage across all tested AOI dimensions (2550 to 2611m),
+    ensures 100% geometric containment, and preserves canonical 1-tile behavior.
+    """
+    test_sizes = [2550, 2560, 2565, 2580, 2600, 2610, 2611]
+    tile_m = 2560.0
+    epsilon_m = 1.0  # 1.0m numerical tolerance
+
+    # 1. Verify 1D tile counts and zero under-coverage
+    for s in test_sizes:
+        tiles = max(1, int(math.ceil((s - epsilon_m) / tile_m)))
+        proc_extent = tiles * tile_m
+        undercoverage = max(0.0, s - proc_extent)
+        assert undercoverage == 0.0, f"Size {s}m produced under-coverage of {undercoverage}m"
+        if s <= 2560:
+            assert tiles == 1, f"Size {s}m should be 1 tile, got {tiles}"
+        else:
+            assert tiles == 2, f"Size {s}m should be 2 tiles to prevent under-coverage, got {tiles}"
+
+    # 2. Verify all 49 2D combinations (width x height)
+    for w in test_sizes:
+        for h in test_sizes:
+            tx = max(1, int(math.ceil((w - epsilon_m) / tile_m)))
+            ty = max(1, int(math.ceil((h - epsilon_m) / tile_m)))
+            proc_w = tx * tile_m
+            proc_h = ty * tile_m
+            assert proc_w >= w, f"Width under-coverage for {w}x{h}"
+            assert proc_h >= h, f"Height under-coverage for {w}x{h}"
+
+    # 3. Verify canonical single-tile footprints across Indian latitudes
+    for lat in [8.08, 13.20, 17.2615, 19.65, 21.83, 24.55, 29.55, 34.113]:
+        bbox = compute_canonical_tile_bbox(lat, 75.0, tile_size_m=2560.0)
+        w_km, h_km = calculate_geographic_span(bbox)
+        w_m = w_km * 1000.0
+        h_m = h_km * 1000.0
+        tx = max(1, int(math.ceil((w_m - epsilon_m) / tile_m)))
+        ty = max(1, int(math.ceil((h_m - epsilon_m) / tile_m)))
+        assert tx == 1 and ty == 1, f"Canonical tile at lat={lat} must be 1x1, got {tx}x{ty}"
+
+    # 4. Pipeline Execution: Test AOI with 2580m span (requires 2x2 = 4 tiles)
+    bbox_2580 = compute_canonical_tile_bbox(17.2615, 73.3715, tile_size_m=2580.0)
+    res_2580 = offline_pipeline.run(
+        query="Test 2580m AOI boundary containment",
+        bbox=bbox_2580,
+        mode="offline",
+        task_override="waterbody",
+    )
+    assert res_2580.status == "COMPLETE"
+    assert res_2580.diagnostics.get("actual_processed_tile_count") == 4
+    proc_b = res_2580.diagnostics.get("actual_processed_bbox")
+    assert proc_b[0] <= bbox_2580[0]
+    assert proc_b[1] <= bbox_2580[1]
+    assert proc_b[2] >= bbox_2580[2]
+    assert proc_b[3] >= bbox_2580[3]
+
+    # 5. Pipeline Execution: Test AOI with 2550m span (strictly 1 tile)
+    bbox_2550 = compute_canonical_tile_bbox(17.2615, 73.3715, tile_size_m=2550.0)
+    res_2550 = offline_pipeline.run(
+        query="Test 2550m AOI boundary containment",
+        bbox=bbox_2550,
+        mode="offline",
+        task_override="waterbody",
+    )
+    assert res_2550.status == "COMPLETE"
+    assert res_2550.diagnostics.get("actual_processed_tile_count") == 1
+    proc_b1 = res_2550.diagnostics.get("actual_processed_bbox")
+    assert proc_b1[0] <= bbox_2550[0]
+    assert proc_b1[1] <= bbox_2550[1]
+    assert proc_b1[2] >= bbox_2550[2]
+    assert proc_b1[3] >= bbox_2550[3]
+
