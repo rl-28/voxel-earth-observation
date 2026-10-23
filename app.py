@@ -936,8 +936,8 @@ def render_dashboard():
             num_analyzed_tiles = res.diagnostics.get("actual_processed_tile_count") or len(res.diagnostics.get("multi_tile_predictions", [])) or (res.diagnostics.get("total_scene_tiles") or 1)
             tile_count_str = f"{num_analyzed_tiles} Tile{'s' if num_analyzed_tiles > 1 else ''} ({num_analyzed_tiles * 2.56:.2f} km² Analyzed)"
             coverage_label = f"Full AOI Coverage ({num_analyzed_tiles} Tiles)" if num_analyzed_tiles > 1 else "Canonical 1-Tile Coverage (2.56 km)"
-            exec_ckpt_path = res.checkpoint_path or f"checkpoints/real_{res.task_type}/best_fusion_net.pth"
-            exec_ckpt_name = os.path.basename(exec_ckpt_path)
+            exec_ckpt_path = res.model_checkpoint or f"checkpoints/real_{res.task_type}/best_fusion_net.pth"
+            exec_ckpt_name = os.path.basename(exec_ckpt_path) if exec_ckpt_path else "None"
 
             st.markdown('<div class="voxel-card" style="margin-top: 14px;">', unsafe_allow_html=True)
             st.markdown('<div class="voxel-card-header">REAL SATELLITE PROVENANCE &amp; GEOGRAPHICAL LOCATOR</div>', unsafe_allow_html=True)

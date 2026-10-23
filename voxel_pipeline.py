@@ -122,6 +122,11 @@ class VoxelPipelineResult:
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
+    @property
+    def checkpoint_path(self) -> Optional[str]:
+        """Backward-compatible alias for model_checkpoint."""
+        return self.model_checkpoint
+
     def to_dict(self) -> Dict[str, Any]:
         """Serializes the result contract to a standard dictionary."""
         d = asdict(self)
