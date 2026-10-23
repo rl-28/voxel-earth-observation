@@ -21,6 +21,7 @@ import os
 import sys
 import time
 import json
+import math
 import logging
 import argparse
 from pathlib import Path
@@ -38,6 +39,13 @@ if sys.platform == "win32":
         sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
     except Exception:
         pass
+
+# VOXEL Geospatial Compatibility Adapter
+try:
+    from utils.geospatial_raster import ensure_rasterio_shim
+    ensure_rasterio_shim()
+except ImportError:
+    pass
 
 # Setup logger
 logging.basicConfig(
@@ -71,6 +79,11 @@ from config.constants import (
     SENTINEL2_BAND_KEYS,
     SENTINEL2_BANDS,
 )
+
+# Configurable Default Sentinel-2 STAC Search Window (Fix 3)
+DEFAULT_STAC_START_DATE = "2023-01-01"
+DEFAULT_STAC_END_DATE = "2024-12-31"
+DEFAULT_STAC_CLOUD_COVER = 20.0
 
 
 @dataclass
@@ -112,12 +125,22 @@ class VoxelPipelineResult:
     def to_dict(self) -> Dict[str, Any]:
         """Serializes the result contract to a standard dictionary."""
         d = asdict(self)
-        if "diagnostics" in d and isinstance(d["diagnostics"], dict):
-            d["diagnostics"] = {
-                k: v for k, v in d["diagnostics"].items()
-                if not (isinstance(v, np.ndarray) or k in ["rgb_image_array", "calibrated_tensor", "raw_tensor"])
-            }
-        return d
+        def _sanitize(val):
+            if isinstance(val, np.ndarray):
+                return None
+            elif isinstance(val, (np.floating, float)):
+                return float(val)
+            elif isinstance(val, (np.integer, int)):
+                return int(val)
+            elif isinstance(val, dict):
+                return {
+                    k: _sanitize(v) for k, v in val.items()
+                    if not (isinstance(v, np.ndarray) or k in ["rgb_image_array", "calibrated_tensor", "raw_tensor", "processed_tensor"])
+                }
+            elif isinstance(val, list):
+                return [_sanitize(v) for v in val if not isinstance(v, np.ndarray)]
+            return val
+        return _sanitize(d)
 
     def save_json(self, output_path: Union[str, Path]) -> str:
         """Saves execution result to a machine-readable JSON file."""
@@ -172,8 +195,32 @@ class VoxelPipeline:
         """
         Maps the Stage 0 contract task to a downstream classifier profile,
         precomputed mask path, class names, and binary flag.
+
+        Priority Rules:
+        1. An explicit user_task_override takes absolute precedence over prompt or contract.
+        2. If user_task_override is None or 'auto', infer the task from user_prompt and contract_task.
         """
-        text_to_check = f"{user_task_override or ''} {user_prompt or ''} {contract_task or ''}".upper()
+        # 1. Explicit User Override Takes Absolute Precedence
+        if user_task_override and str(user_task_override).strip().lower() != "auto":
+            override_clean = str(user_task_override).strip().lower()
+            if any(w in override_clean for w in ["water", "lake", "river", "wetland", "flood"]):
+                task_key = "waterbody"
+                mask_path = self.mask_dir / "waterbody_mask.json"
+                classes = TASKS["waterbody"]["classes"]
+                return task_key, mask_path, len(classes), classes, True
+            elif any(w in override_clean for w in ["forest", "tree", "canopy", "woodland"]):
+                task_key = "forest_cover"
+                mask_path = self.mask_dir / "forest_cover_mask.json"
+                classes = TASKS["forest_cover"]["classes"]
+                return task_key, mask_path, len(classes), classes, True
+            elif any(w in override_clean for w in ["general", "landcover", "eurosat"]):
+                task_key = "general"
+                mask_path = None
+                classes = list(LAND_COVER_CLASSES)
+                return task_key, mask_path, len(classes), classes, False
+
+        # 2. Inferred from Query Prompt and Contract Task
+        text_to_check = f"{user_prompt or ''} {contract_task or ''}".upper()
 
         if any(w in text_to_check for w in ["WATER", "MOISTURE", "INUNDATION", "FLOOD", "LAKE", "RIVER", "WETLAND"]):
             task_key = "waterbody"
@@ -252,16 +299,26 @@ class VoxelPipeline:
     def acquire_and_process_real_satellite_data(
         self,
         bbox: List[float],
-        start_date: str = "2024-01-01",
-        end_date: str = "2024-06-30",
-        cloud_cover: float = 20.0,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        cloud_cover: float = DEFAULT_STAC_CLOUD_COVER,
+        allow_fallback: bool = True,
         cache_dir: str = "data/cache/stac",
     ) -> Tuple[Optional[np.ndarray], Dict[str, Any], List[str]]:
         """
         Acquires real Sentinel-2 Level-2A imagery for the requested BBOX using
         public AWS Earth Search STAC, downloads bands, and executes Module 1 processing.
+
+        Fix 3:
+        1. Accepts user-specified acquisition date range (start_date, end_date).
+        2. Where no date is specified, uses configurable default (DEFAULT_STAC_START_DATE/END_DATE).
+        3. Filters candidate items to ensure spectral assets are present and sorts by lowest cloud cover.
+        4. Provides controlled fallback search (relaxing cloud cover / expanding date window) when
+           allow_fallback is True, recording transparent notices in warnings.
+        5. Preserves full real STAC provenance, item IDs, and acquisition timestamps.
         """
         errors = []
+        stac_warnings = []
         min_lon, min_lat, max_lon, max_lat = bbox
         geojson_aoi = {
             "type": "Polygon",
@@ -274,56 +331,130 @@ class VoxelPipeline:
             ]],
         }
 
-        logger.info(f"Searching Sentinel-2 L2A STAC scenes for BBOX {bbox}...")
-        try:
-            items = self.earth_search_stac.search_sentinel2_l2a(
+        actual_start_date = start_date.strip() if (start_date and str(start_date).strip()) else DEFAULT_STAC_START_DATE
+        actual_end_date = end_date.strip() if (end_date and str(end_date).strip()) else DEFAULT_STAC_END_DATE
+        actual_cloud_cover = float(cloud_cover) if cloud_cover is not None else DEFAULT_STAC_CLOUD_COVER
+        relaxation_info = None
+
+        def execute_search(s_date: str, e_date: str, cc: float) -> List[Any]:
+            found = self.earth_search_stac.search_sentinel2_l2a(
                 aoi=geojson_aoi,
-                start_date=start_date,
-                end_date=end_date,
-                cloud_cover=cloud_cover,
-                max_items=1,
+                start_date=s_date,
+                end_date=e_date,
+                cloud_cover=cc,
+                max_items=15,
             )
+            valid_items = []
+            for it in found:
+                assets = it.assets
+                # Check for required optical assets
+                has_assets = all(
+                    self.earth_search_stac.get_band_asset_key(b) in assets
+                    for b in ["B02", "B03", "B04", "B08"]
+                )
+                if has_assets:
+                    valid_items.append(it)
+            # Sort ascending by cloud cover to select best scene
+            valid_items.sort(key=lambda it: float(it.properties.get("eo:cloud_cover", 100.0)))
+            return valid_items
+
+        logger.info(
+            f"Searching Sentinel-2 L2A STAC scenes for BBOX {bbox} "
+            f"between {actual_start_date} and {actual_end_date} (cloud_cover <= {actual_cloud_cover}%)..."
+        )
+        try:
+            items = execute_search(actual_start_date, actual_end_date, actual_cloud_cover)
         except Exception as e:
             errors.append(f"STAC search request failed: {e}")
             return None, {}, errors
 
+        # Controlled Fallback Relaxation (visible to user, never silent)
+        if not items and allow_fallback:
+            logger.info("Initial STAC search returned 0 scenes. Initiating controlled search relaxation...")
+            # Fallback Stage 1: Relax cloud cover to 40% (if original was < 40%)
+            if actual_cloud_cover < 40.0:
+                try:
+                    items = execute_search(actual_start_date, actual_end_date, 40.0)
+                    if items:
+                        notice = (
+                            f"Notice: Initial search criteria (cloud_cover <= {actual_cloud_cover}%) yielded 0 scenes. "
+                            f"Controlled fallback relaxed cloud cover threshold to <= 40.0% ({actual_start_date} to {actual_end_date})."
+                        )
+                        stac_warnings.append(notice)
+                        relaxation_info = {"relaxed_cloud_cover": 40.0, "stage": 1}
+                except Exception as e:
+                    logger.debug(f"Fallback stage 1 search error: {e}")
+
+            # Fallback Stage 2: Expand date window to 2022-01-01 with cloud cover <= 40%
+            if not items:
+                try:
+                    expanded_start = "2022-01-01"
+                    cc_target = max(actual_cloud_cover, 40.0)
+                    items = execute_search(expanded_start, actual_end_date, cc_target)
+                    if items:
+                        notice = (
+                            f"Notice: Initial search ({actual_start_date} to {actual_end_date}, cloud_cover <= {actual_cloud_cover}%) "
+                            f"yielded 0 scenes. Controlled fallback expanded date window to {expanded_start} to {actual_end_date} "
+                            f"with cloud cover <= {cc_target}%."
+                        )
+                        stac_warnings.append(notice)
+                        relaxation_info = {"relaxed_start_date": expanded_start, "relaxed_cloud_cover": cc_target, "stage": 2}
+                except Exception as e:
+                    logger.debug(f"Fallback stage 2 search error: {e}")
+
+            # Fallback Stage 3: Relax cloud cover to 75% across expanded window
+            if not items:
+                try:
+                    expanded_start = "2022-01-01"
+                    items = execute_search(expanded_start, actual_end_date, 75.0)
+                    if items:
+                        notice = (
+                            f"Notice: Controlled fallback relaxed cloud cover threshold to <= 75.0% "
+                            f"across {expanded_start} to {actual_end_date} to find available Sentinel-2 imagery."
+                        )
+                        stac_warnings.append(notice)
+                        relaxation_info = {"relaxed_start_date": expanded_start, "relaxed_cloud_cover": 75.0, "stage": 3}
+                except Exception as e:
+                    logger.debug(f"Fallback stage 3 search error: {e}")
+
         if not items:
             errors.append(
-                f"No Sentinel-2 L2A scenes found meeting cloud cover <= {cloud_cover}% "
-                f"for BBOX {bbox} between {start_date} and {end_date}."
+                f"No Sentinel-2 L2A scenes found meeting cloud cover <= {actual_cloud_cover}% "
+                f"for BBOX {bbox} between {actual_start_date} and {actual_end_date}."
+                + (" Fallback relaxation also found no scenes." if allow_fallback else " (Fallback relaxation disabled).")
             )
             return None, {}, errors
 
+        # Item with lowest cloud cover is selected
         selected_item = items[0]
-        logger.info(f"Selected STAC Item: {selected_item.id} (Cloud Cover: {selected_item.properties.get('eo:cloud_cover', 'N/A')}%)")
+        logger.info(
+            f"Selected STAC Item: {selected_item.id} "
+            f"(Cloud Cover: {selected_item.properties.get('eo:cloud_cover', 'N/A')}%, "
+            f"Datetime: {selected_item.datetime.isoformat() if selected_item.datetime else 'N/A'})"
+        )
 
-        # Ensure download BBOX is sufficiently buffered to yield at least 256x256 pixels
-        c_lon = (min_lon + max_lon) / 2.0
-        c_lat = (min_lat + max_lat) / 2.0
-        half_span_lon = max((max_lon - min_lon) / 2.0, 0.016)
-        half_span_lat = max((max_lat - min_lat) / 2.0, 0.016)
-        buffered_bbox = [
-            round(c_lon - half_span_lon, 4),
-            round(c_lat - half_span_lat, 4),
-            round(c_lon + half_span_lon, 4),
-            round(c_lat + half_span_lat, 4),
-        ]
+        # Isolate cache directory per unique AOI to prevent cross-location scene collisions
+        bbox_slug = f"{min_lon:.4f}_{min_lat:.4f}_{max_lon:.4f}_{max_lat:.4f}".replace('.', 'p').replace('-', 'm')
+        item_cache_dir = os.path.join(cache_dir, f"{selected_item.id}_{bbox_slug}")
+        legacy_cache_dir = os.path.join(cache_dir, selected_item.id)
 
-        # Check if scene was previously cached locally
-        item_cache_dir = os.path.join(cache_dir, selected_item.id)
+        target_item_dir = item_cache_dir
+        if not os.path.exists(item_cache_dir) and os.path.exists(legacy_cache_dir):
+            target_item_dir = legacy_cache_dir
+
         is_already_cached = (
-            os.path.exists(item_cache_dir)
+            os.path.exists(target_item_dir)
             and any(
-                f.endswith(".tif") and os.path.getsize(os.path.join(item_cache_dir, f)) > 1000
-                for f in os.listdir(item_cache_dir)
+                f.endswith(".tif") and os.path.getsize(os.path.join(target_item_dir, f)) > 1000
+                for f in os.listdir(target_item_dir)
             )
         )
 
         try:
             band_paths = self.earth_search_stac.download_bands(
                 item=selected_item,
-                target_dir=item_cache_dir,
-                bbox=buffered_bbox,
+                target_dir=target_item_dir,
+                bbox=bbox,
                 overwrite=False,
             )
         except Exception as e:
@@ -341,6 +472,31 @@ class VoxelPipeline:
 
             first_tile_res: Module1Result = results[0]
             processed_tensor = first_tile_res.processed_tensor  # (13, 256, 256)
+
+            from rasterio.warp import transform_bounds
+            tiles_data = []
+            for r in results:
+                raw_b = r.metadata.get("bounds") if hasattr(r, "metadata") and isinstance(r.metadata, dict) else (r.diagnostics.get("bounds") if hasattr(r, "diagnostics") and isinstance(r.diagnostics, dict) else None)
+                crs = r.metadata.get("crs") if hasattr(r, "metadata") and isinstance(r.metadata, dict) else None
+                wgs84_b = None
+                if raw_b and crs:
+                    try:
+                        wb = transform_bounds(crs, "EPSG:4326", *raw_b)
+                        wgs84_b = [round(wb[0], 4), round(wb[1], 4), round(wb[2], 4), round(wb[3], 4)]
+                    except Exception:
+                        wgs84_b = list(raw_b)
+                elif raw_b:
+                    wgs84_b = list(raw_b)
+
+                tiles_data.append({
+                    "tile_id": r.tile_id,
+                    "processed_tensor": r.processed_tensor,
+                    "diagnostics": r.diagnostics,
+                    "bounds": wgs84_b,
+                    "raw_bounds": raw_b,
+                    "crs": crs,
+                })
+
             metadata = {
                 "stac_item_id": selected_item.id,
                 "scene_id": selected_item.id,
@@ -352,8 +508,15 @@ class VoxelPipeline:
                 "tile_id": first_tile_res.tile_id,
                 "diagnostics": first_tile_res.diagnostics,
                 "total_scene_tiles": len(results),
+                "tiles_data": tiles_data,
                 "is_cached": is_already_cached,
                 "cache_status": "Cached on Disk (Zero Network IO)" if is_already_cached else "Newly Acquired via STAC COG",
+                "search_start_date": actual_start_date,
+                "search_end_date": actual_end_date,
+                "search_cloud_threshold": actual_cloud_cover,
+                "fallback_applied": relaxation_info is not None,
+                "relaxation_info": relaxation_info,
+                "warnings": stac_warnings,
             }
             return processed_tensor, metadata, []
 
@@ -599,16 +762,29 @@ class VoxelPipeline:
         run_faiss: bool = True,
         output_json: Optional[str] = None,
         synthetic_seed: int = 42,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        cloud_cover: float = DEFAULT_STAC_CLOUD_COVER,
+        allow_fallback: bool = True,
+        bbox: Optional[List[float]] = None,
         **kwargs,
     ) -> VoxelPipelineResult:
         """
         Executes the unified end-to-end VOXEL pipeline for a natural language query.
         """
-        # Support common aliases
+        # Support common aliases and dynamic STAC parameters
         if "explain_shap" in kwargs:
             run_shap = kwargs["explain_shap"]
         if "optimize_bands" in kwargs:
             optimize = kwargs["optimize_bands"]
+        if "start_date" in kwargs and start_date is None:
+            start_date = kwargs["start_date"]
+        if "end_date" in kwargs and end_date is None:
+            end_date = kwargs["end_date"]
+        if "cloud_cover" in kwargs and cloud_cover == DEFAULT_STAC_CLOUD_COVER:
+            cloud_cover = kwargs["cloud_cover"]
+        if "allow_fallback" in kwargs:
+            allow_fallback = kwargs["allow_fallback"]
 
         start_total = time.perf_counter()
         timing_breakdown: Dict[str, float] = {}
@@ -632,10 +808,37 @@ class VoxelPipeline:
         # ---------------------------------------------------------------------
         # STAGE 0: Natural Language Query Compilation & Geocoding
         # ---------------------------------------------------------------------
+        # Explicit Bounding Box Override (e.g. from Interactive Map AOI selector)
+        explicit_bbox = bbox or kwargs.get("bbox") or kwargs.get("coordinates")
+        validated_bbox = None
+        if explicit_bbox is not None:
+            if not isinstance(explicit_bbox, (list, tuple)) or len(explicit_bbox) != 4:
+                raise ValueError(f"Invalid BBOX specification: {explicit_bbox}. Expected [min_lon, min_lat, max_lon, max_lat].")
+            min_lon, min_lat, max_lon, max_lat = [float(x) for x in explicit_bbox]
+            if not (-180.0 <= min_lon <= 180.0 and -180.0 <= max_lon <= 180.0 and -90.0 <= min_lat <= 90.0 and -90.0 <= max_lat <= 90.0):
+                raise ValueError(f"Coordinates out of physical bounds: [{min_lon}, {min_lat}, {max_lon}, {max_lat}]")
+            if min_lon >= max_lon or min_lat >= max_lat:
+                raise ValueError(f"Invalid bounding box geometry: min must be strictly less than max. Got [{min_lon}, {min_lat}, {max_lon}, {max_lat}]")
+
+            # Explicit AOI-size limit to protect CPU/memory (Requirement 3)
+            span_lon = max_lon - min_lon
+            span_lat = max_lat - min_lat
+            if span_lon > 0.08 or span_lat > 0.08:
+                raise ValueError(
+                    f"Selected AOI span ({span_lon*111.3:.1f} km × {span_lat*111.3:.1f} km) exceeds maximum supported single-scene limit (8.0 km × 8.0 km / 0.08°). "
+                    "Please draw a smaller rectangular area or select a point to protect system resources."
+                )
+            validated_bbox = [round(min_lon, 4), round(min_lat, 4), round(max_lon, 4), round(max_lat, 4)]
+
         t0_start = time.perf_counter()
         logger.info("[STAGE 0] Compiling natural language query and resolving geographic location...")
-        contract: VoxelExecutionContract = self.stage0_parser.parse(query)
+        contract: VoxelExecutionContract = self.stage0_parser.parse(query, bbox=validated_bbox)
         timing_breakdown["stage_0_query_compilation_ms"] = (time.perf_counter() - t0_start) * 1000.0
+
+        if validated_bbox is not None:
+            contract.bbox = validated_bbox
+            contract.location_name = f"Custom AOI [{validated_bbox[0]:.4f}, {validated_bbox[1]:.4f}, {validated_bbox[2]:.4f}, {validated_bbox[3]:.4f}]"
+            contract.geocoder = "Interactive Map / Explicit BBOX Input"
 
         resolved_location = {
             "name": contract.location_name,
@@ -649,6 +852,18 @@ class VoxelPipeline:
         )
         diagnostics["task_key"] = task_key
         diagnostics["is_binary"] = is_binary
+
+        # Task Selection Override Notice (Honors explicit selection, warns of query text mismatch)
+        if task_override and str(task_override).strip().lower() != "auto":
+            q_upper_check = query.upper()
+            if task_key == "forest_cover" and any(w in q_upper_check for w in ["WATER", "LAKE", "RIVER", "WETLAND", "FLOOD"]):
+                mismatch_note = f"Task Selection Override: Query mentions water bodies, but explicit profile '{task_override}' was selected. System strictly executed the Forest Cover CNN–ViT checkpoint."
+                warnings.append(mismatch_note)
+                diagnostics["task_mismatch_note"] = mismatch_note
+            elif task_key == "waterbody" and any(w in q_upper_check for w in ["FOREST", "TREE", "CANOPY", "WOODLAND"]):
+                mismatch_note = f"Task Selection Override: Query mentions forest canopy, but explicit profile '{task_override}' was selected. System strictly executed the Waterbody CNN–ViT checkpoint."
+                warnings.append(mismatch_note)
+                diagnostics["task_mismatch_note"] = mismatch_note
 
         # Task Scope and Scientific Qualification
         qualification_notes = []
@@ -684,7 +899,13 @@ class VoxelPipeline:
         if is_real_mode:
             raw_tensor, mod1_meta, mod1_errors = self.acquire_and_process_real_satellite_data(
                 bbox=contract.bbox,
+                start_date=start_date,
+                end_date=end_date,
+                cloud_cover=cloud_cover,
+                allow_fallback=allow_fallback,
             )
+            if mod1_meta.get("warnings"):
+                warnings.extend(mod1_meta["warnings"])
             if raw_tensor is None:
                 errors.extend(mod1_errors)
                 timing_breakdown["total_execution_ms"] = (time.perf_counter() - start_total) * 1000.0
@@ -724,7 +945,47 @@ class VoxelPipeline:
             diagnostics["stac_item_id"] = s_id
             diagnostics["cache_status"] = mod1_meta.get("cache_status", "Unknown")
         else:
-            raw_tensor, mod1_meta = self.generate_synthetic_tile(task_key, seed=synthetic_seed)
+            # Check if multi-tile is requested based on span
+            from utils.llm_parser import calculate_geographic_span
+            span_w_km, span_h_km = calculate_geographic_span(contract.bbox)
+            tiles_x = max(1, int(math.ceil((span_w_km - 0.05) / 2.56)))
+            tiles_y = max(1, int(math.ceil((span_h_km - 0.05) / 2.56)))
+            total_tiles = tiles_x * tiles_y
+
+            if total_tiles > 1:
+                tiles_data = []
+                d_lon = (contract.bbox[2] - contract.bbox[0]) / tiles_x
+                d_lat = (contract.bbox[3] - contract.bbox[1]) / tiles_y
+                for r_idx in range(tiles_y):
+                    for c_idx in range(tiles_x):
+                        tile_t, _ = self.generate_synthetic_tile(task_key, seed=synthetic_seed + r_idx * tiles_x + c_idx)
+                        t_b = [
+                            round(contract.bbox[0] + c_idx * d_lon, 4),
+                            round(contract.bbox[3] - (r_idx + 1) * d_lat, 4),
+                            round(contract.bbox[0] + (c_idx + 1) * d_lon, 4),
+                            round(contract.bbox[3] - r_idx * d_lat, 4),
+                        ]
+                        tiles_data.append({
+                            "tile_id": f"tile_{r_idx:03d}_{c_idx:03d}",
+                            "processed_tensor": tile_t,
+                            "bounds": t_b,
+                            "diagnostics": {"tile_shape": list(tile_t.shape)},
+                        })
+                raw_tensor = tiles_data[0]["processed_tensor"]
+                mod1_meta = {
+                    "synthetic_seed": synthetic_seed,
+                    "provenance": "synthetic_mock_fixture",
+                    "total_scene_tiles": len(tiles_data),
+                    "tiles_data": tiles_data,
+                }
+            else:
+                raw_tensor, mod1_meta = self.generate_synthetic_tile(task_key, seed=synthetic_seed)
+                mod1_meta["tiles_data"] = [{
+                    "tile_id": "tile_000_000",
+                    "processed_tensor": raw_tensor,
+                    "bounds": contract.bbox,
+                    "diagnostics": {"tile_shape": list(raw_tensor.shape)},
+                }]
             data_source_label = f"Synthetic Deterministic Surface Reflectance Tile (Seed: {synthetic_seed})"
             is_synthetic_flag = True
             diagnostics["module1_metadata"] = mod1_meta
@@ -907,6 +1168,67 @@ class VoxelPipeline:
                 print(f"  [+] Module 3 Embedding       : Shape ({embedding_np.shape[0]},) [1216-dim representation]")
 
         timing_breakdown["module_3_inference_ms"] = (time.perf_counter() - t3_start) * 1000.0
+
+        # Multi-tile AOI Support (Requirements 3 & 4: Preserve spatial integrity across multi-tile rectangles)
+        tiles_data = mod1_meta.get("tiles_data", [])
+        if len(tiles_data) > 1 and model is not None:
+            multi_tile_preds = []
+            for idx, t_item in enumerate(tiles_data):
+                t_id = t_item.get("tile_id", f"tile_{idx}")
+                t_tensor = t_item.get("processed_tensor", t_item.get("data"))
+                if t_tensor is None:
+                    continue
+                t_inp = torch.from_numpy(t_tensor).unsqueeze(0).to(self.device)
+                with torch.no_grad():
+                    t_logits = model(t_inp, mask=mask_device)
+                    t_probs = torch.softmax(t_logits, dim=-1).squeeze(0)
+                t_pid = int(torch.argmax(t_probs).item())
+                t_pname = active_class_list[t_pid] if 0 <= t_pid < len(active_class_list) else f"Class_{t_pid}"
+                t_conf = float(t_probs[t_pid].item() * 100.0)
+                t_bounds = t_item.get("bounds", t_item.get("diagnostics", {}).get("bounds"))
+                multi_tile_preds.append({
+                    "tile_id": t_id,
+                    "predicted_class_id": t_pid,
+                    "predicted_class_name": t_pname,
+                    "confidence_pct": t_conf,
+                    "bounds": t_bounds,
+                    "all_probabilities": {
+                        active_class_list[i]: float(t_probs[i].item() * 100.0)
+                        for i in range(len(active_class_list))
+                    },
+                })
+            diagnostics["multi_tile_predictions"] = multi_tile_preds
+            diagnostics["total_tiles_analyzed"] = len(multi_tile_preds)
+            spatial_msg = f"Multi-tile Footprint: Evaluated {len(multi_tile_preds)} spatial tiles (256×256 px each) across the rectangular AOI. Individual tile classifications are reported without whole-area artificial averaging."
+            diagnostics["spatial_integrity_warning"] = spatial_msg
+            warnings.append(spatial_msg)
+
+            # Record union bounding box of all processed tiles
+            valid_b = [tp["bounds"] for tp in multi_tile_preds if isinstance(tp.get("bounds"), (list, tuple)) and len(tp["bounds"]) == 4]
+            if valid_b:
+                actual_proc_bbox = [
+                    round(min(b[0] for b in valid_b), 4),
+                    round(min(b[1] for b in valid_b), 4),
+                    round(max(b[2] for b in valid_b), 4),
+                    round(max(b[3] for b in valid_b), 4),
+                ]
+            else:
+                actual_proc_bbox = contract.bbox
+            diagnostics["actual_processed_bbox"] = actual_proc_bbox
+            diagnostics["actual_processed_tile_count"] = len(multi_tile_preds)
+        else:
+            single_b = None
+            if tiles_data and isinstance(tiles_data[0].get("bounds"), (list, tuple)) and len(tiles_data[0]["bounds"]) == 4:
+                single_b = tiles_data[0]["bounds"]
+            diagnostics["actual_processed_bbox"] = single_b or contract.bbox
+            diagnostics["actual_processed_tile_count"] = 1
+
+        # Clean bulky ndarrays from module1_metadata tiles_data for clean serialization
+        if "tiles_data" in mod1_meta and isinstance(mod1_meta["tiles_data"], list):
+            for td in mod1_meta["tiles_data"]:
+                if isinstance(td, dict):
+                    td.pop("processed_tensor", None)
+                    td.pop("data", None)
 
         # ---------------------------------------------------------------------
         # Optional: Explainability (SHAP Attributions)

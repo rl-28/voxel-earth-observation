@@ -13,6 +13,8 @@ import re
 import logging
 import urllib.request
 import urllib.parse
+import math
+import numpy as np
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Any, Tuple
 
@@ -44,6 +46,40 @@ DEFAULT_LOCATION_NAME = "South Mumbai, India"
 DEFAULT_LAT = 18.95
 DEFAULT_LON = 72.82
 BBOX_OFFSET = 0.0125  # ~1.28 km radius offset matching 256x256 pixel tile footprint at 10m/pixel
+
+
+def calculate_geographic_span(bbox: List[float]) -> Tuple[float, float]:
+    """
+    Computes physical ground span (width_km, height_km) of a WGS84 bounding box [min_lon, min_lat, max_lon, max_lat].
+    Uses precise WGS84 ellipsoidal distance formulas.
+    """
+    min_lon, min_lat, max_lon, max_lat = bbox
+    mid_lat = (min_lat + max_lat) / 2.0
+    lat_rad = np.radians(mid_lat)
+    m_per_deg_lat = 111132.95 - 559.82 * np.cos(2 * lat_rad) + 1.175 * np.cos(4 * lat_rad)
+    m_per_deg_lon = 111412.84 * np.cos(lat_rad) - 93.5 * np.cos(3 * lat_rad)
+    width_km = (max_lon - min_lon) * m_per_deg_lon / 1000.0
+    height_km = (max_lat - min_lat) * m_per_deg_lat / 1000.0
+    return float(width_km), float(height_km)
+
+
+def compute_canonical_tile_bbox(lat: float, lon: float, tile_size_m: float = 2560.0) -> List[float]:
+    """
+    Computes exact WGS84 bounding box [min_lon, min_lat, max_lon, max_lat] centered at (lat, lon)
+    matching exactly tile_size_m x tile_size_m (canonical 2560m = 256 px at 10m Sentinel-2 GSD).
+    """
+    lat_rad = np.radians(lat)
+    m_per_deg_lat = 111132.95 - 559.82 * np.cos(2 * lat_rad) + 1.175 * np.cos(4 * lat_rad)
+    m_per_deg_lon = 111412.84 * np.cos(lat_rad) - 93.5 * np.cos(3 * lat_rad)
+    half_m = tile_size_m / 2.0
+    d_lat = half_m / m_per_deg_lat
+    d_lon = half_m / m_per_deg_lon
+    return [
+        round(float(lon - d_lon), 4),
+        round(float(lat - d_lat), 4),
+        round(float(lon + d_lon), 4),
+        round(float(lat + d_lat), 4),
+    ]
 
 # Task Profile Constants
 TASK_WATER = "WATER_MOISTURE"
@@ -153,20 +189,109 @@ def _call_gemini_rest_api(api_key: str, system_prompt: str, model_name: str = "g
     return None
 
 
-def _geocode_location_live(location_query: str, google_maps_key: Optional[str] = None) -> Tuple[float, float, str]:
+def parse_geographic_coordinates(text: str) -> Optional[Tuple[float, float, Optional[List[float]], str]]:
     """
-    Geocodes a location query to (latitude, longitude, provider_name).
-    Tries:
-    1. Google Maps Geocoding API (if key present)
-    2. OpenStreetMap Nominatim live REST HTTP with progressive relaxation
-    3. geopy Nominatim (if installed)
-    4. Fallback to South Mumbai (18.95, 72.82) on network failure or unfound queries.
+    Detects and validates numeric coordinates (decimal lat/lon pair or 4-element BBOX)
+    before sending text to external geocoders.
+    
+    Supports:
+    - Decimal coordinate pairs: "19.0760, 72.8777", "19.0760 72.8777", "lat: 19.076, lon: 72.877"
+    - Explicit Bounding Boxes: "[72.80, 18.93, 72.85, 18.97]", "72.80, 18.93, 72.85, 18.97"
+    - Coordinate ordering and hemisphere range validation (lat in [-90, 90], lon in [-180, 180]).
+    
+    Returns:
+        Tuple of (latitude, longitude, optional_explicit_bbox, provider_name) or None if not numeric.
+    """
+    if not text or not text.strip():
+        return None
+
+    clean_text = text.strip()
+
+    # 1. Check for 4-element Bounding Box: [min_lon, min_lat, max_lon, max_lat]
+    bbox_match = re.search(
+        r"\[?\s*([-+]?\d+\.?\d*)\s*,\s*([-+]?\d+\.?\d*)\s*,\s*([-+]?\d+\.?\d*)\s*,\s*([-+]?\d+\.?\d*)\s*\]?",
+        clean_text
+    )
+    if bbox_match:
+        v1, v2, v3, v4 = [float(bbox_match.group(i)) for i in range(1, 5)]
+        # Case A: Standard GIS [min_lon, min_lat, max_lon, max_lat]
+        if -180.0 <= v1 <= 180.0 and -180.0 <= v3 <= 180.0 and -90.0 <= v2 <= 90.0 and -90.0 <= v4 <= 90.0 and v1 < v3 and v2 < v4:
+            lat = (v2 + v4) / 2.0
+            lon = (v1 + v3) / 2.0
+            return lat, lon, [round(v1, 4), round(v2, 4), round(v3, 4), round(v4, 4)], "Direct Bounding Box Input"
+        # Case B: [min_lat, min_lon, max_lat, max_lon]
+        elif -90.0 <= v1 <= 90.0 and -90.0 <= v3 <= 90.0 and -180.0 <= v2 <= 180.0 and -180.0 <= v4 <= 180.0 and v1 < v3 and v2 < v4:
+            lat = (v1 + v3) / 2.0
+            lon = (v2 + v4) / 2.0
+            return lat, lon, [round(v2, 4), round(v1, 4), round(v4, 4), round(v3, 4)], "Direct Bounding Box Input"
+
+    # 2. Check for labeled coordinates (e.g., lat: 21.57, lon: 83.87 or lon: 83.87, lat: 21.57)
+    lat_match = re.search(r"\b(?:lat|latitude)\s*[:=]?\s*([-+]?\d+\.?\d*)", clean_text, re.IGNORECASE)
+    lon_match = re.search(r"\b(?:lon|lng|longitude)\s*[:=]?\s*([-+]?\d+\.?\d*)", clean_text, re.IGNORECASE)
+    if lat_match and lon_match:
+        lat = float(lat_match.group(1))
+        lon = float(lon_match.group(1))
+        if not (-90.0 <= lat <= 90.0):
+            raise ValueError(f"Latitude out of physical bounds [-90, 90]: {lat}")
+        if not (-180.0 <= lon <= 180.0):
+            raise ValueError(f"Longitude out of physical bounds [-180, 180]: {lon}")
+        return lat, lon, None, "Direct Numeric Coordinate Input"
+
+    # 3. Check for unlabeled 2-element Coordinate Pair: n1, n2
+    coord_match = re.search(
+        r"([-+]?\d+\.?\d*)\s*(?:[,\s/]+)\s*([-+]?\d+\.?\d*)",
+        clean_text,
+        re.IGNORECASE
+    )
+    if coord_match:
+        n1 = float(coord_match.group(1))
+        n2 = float(coord_match.group(2))
+
+        # Check for longitude-first ordering e.g. 105.2, 21.57 (n1 > 90 cannot be latitude)
+        if abs(n1) > 90.0 and abs(n2) <= 90.0:
+            lat, lon = n2, n1
+        elif abs(n1) <= 90.0 and abs(n2) <= 180.0:
+            lat, lon = n1, n2
+        else:
+            raise ValueError(
+                f"Invalid coordinate range: ({n1}, {n2}). Latitude must be between -90 and 90, longitude between -180 and 180."
+            )
+
+        if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+            raise ValueError(
+                f"Coordinates out of physical bounds: lat={lat} (must be [-90, 90]), lon={lon} (must be [-180, 180])."
+            )
+
+        return lat, lon, None, "Direct Numeric Coordinate Input"
+
+    return None
+
+
+def _geocode_location_live(
+    location_query: str, 
+    google_maps_key: Optional[str] = None
+) -> Tuple[float, float, Optional[List[float]], str]:
+    """
+    Geocodes a location query to (latitude, longitude, explicit_bbox, provider_name).
+    
+    Order of operations:
+    1. Direct numeric coordinate / BBOX detection and range validation (bypasses network).
+    2. Google Maps Geocoding API (if key present).
+    3. OpenStreetMap Nominatim live REST HTTP with progressive relaxation.
+    4. geopy Nominatim (if installed).
+    5. Raises a clear ValueError on failure (never silently substitutes South Mumbai).
     """
     if not location_query or not location_query.strip():
-        return DEFAULT_LAT, DEFAULT_LON, "Pre-cached Fallback"
+        raise ValueError("Location query cannot be empty. Please provide a place name or decimal coordinates.")
 
     raw_query = location_query.strip()
-    # Generate candidate queries for complex compounds (e.g. "Amazon Basin, Para, Brazil" -> ["Amazon Basin, Para, Brazil", "Para, Brazil", "Amazon Basin", "Brazil"])
+
+    # Step 1: Detect numeric coordinates / bounding boxes before network calls
+    num_result = parse_geographic_coordinates(raw_query)
+    if num_result is not None:
+        return num_result
+
+    # Step 2: Natural-language candidate queries for complex compounds
     candidates = [raw_query]
     if "," in raw_query:
         parts = [p.strip() for p in raw_query.split(",") if p.strip()]
@@ -186,7 +311,7 @@ def _geocode_location_live(location_query: str, google_maps_key: Optional[str] =
                     data = json.loads(resp.read().decode("utf-8"))
                     if data.get("status") == "OK" and len(data.get("results", [])) > 0:
                         loc = data["results"][0]["geometry"]["location"]
-                        return float(loc["lat"]), float(loc["lng"]), "Google Maps Geocoding API"
+                        return float(loc["lat"]), float(loc["lng"]), None, "Google Maps Geocoding API"
             except Exception as e:
                 logger.debug(f"Google Maps geocoding failed for '{q}': {e}")
 
@@ -201,7 +326,7 @@ def _geocode_location_live(location_query: str, google_maps_key: Optional[str] =
                 if data and len(data) > 0:
                     lat = float(data[0]["lat"])
                     lon = float(data[0]["lon"])
-                    return lat, lon, "OpenStreetMap Nominatim (Live REST)"
+                    return lat, lon, None, "OpenStreetMap Nominatim (Live REST)"
         except Exception as e:
             logger.debug(f"HTTP Nominatim lookup failed for '{q}': {e}")
 
@@ -212,11 +337,15 @@ def _geocode_location_live(location_query: str, google_maps_key: Optional[str] =
             for q in candidates:
                 loc = geolocator.geocode(q, timeout=5)
                 if loc:
-                    return float(loc.latitude), float(loc.longitude), "geopy Nominatim"
+                    return float(loc.latitude), float(loc.longitude), None, "geopy Nominatim"
         except Exception as e:
             logger.debug(f"geopy Nominatim lookup failed: {e}")
 
-    return DEFAULT_LAT, DEFAULT_LON, "Pre-cached Fallback (South Mumbai)"
+    # CRITICAL: Never silently substitute South Mumbai or preset on geocoding failure.
+    raise ValueError(
+        f"Location resolution failed: '{raw_query}' could not be resolved by available geocoders. "
+        "Please check spelling or provide numeric latitude/longitude coordinates (e.g. '19.0760, 72.8777')."
+    )
 
 
 class VoxelStageZeroParser:
@@ -247,11 +376,15 @@ class VoxelStageZeroParser:
 
     def _geocode_to_bbox(self, location_query: str) -> Tuple[List[float], str]:
         """
-        Converts place name into a ~2.56 km x 2.56 km geospatial BBOX:
+        Converts place name or numeric coordinates into a ~2.56 km x 2.56 km geospatial BBOX:
         [min_lon, min_lat, max_lon, max_lat] and returns geocoder name.
         """
         gmaps_key = self.api_mgr.get_google_maps_key() if self.api_mgr else None
-        lat, lon, provider = _geocode_location_live(location_query, google_maps_key=gmaps_key)
+        lat, lon, explicit_bbox, provider = _geocode_location_live(location_query, google_maps_key=gmaps_key)
+        
+        if explicit_bbox is not None:
+            return explicit_bbox, provider
+
         offset = BBOX_OFFSET
         bbox = [
             round(lon - offset, 4),  # min_lon
@@ -282,18 +415,29 @@ class VoxelStageZeroParser:
             task_type = TASK_GENERAL
 
         # 2. Extract Location heuristics
-        location_query = DEFAULT_LOCATION_NAME
-        loc_patterns = [
-            r"\b(?:in|around|near|across|over|for)\s+([A-Z][a-zA-Z0-9\s,\-\.]+?)(?:\s+(?:for|to|with|using|and|\.|\?|$)|$)",
-            r"\b(?:in|around|near|across|over|for)\s+([a-zA-Z\s,\-\.]+?)(?:\s+(?:for|to|with|using|and|\.|\?|$)|$)"
-        ]
-        for pat in loc_patterns:
-            match = re.search(pat, user_prompt)
-            if match:
-                extracted = match.group(1).strip()
-                if len(extracted) > 2 and extracted.lower() not in ["the", "a", "an", "all", "our", "general", "each"]:
-                    location_query = extracted
-                    break
+        location_query = None
+        # Check if coordinates exist directly in prompt first
+        num_coords = parse_geographic_coordinates(user_prompt)
+        if num_coords is not None:
+            lat, lon, explicit_bbox, _ = num_coords
+            if explicit_bbox is not None:
+                location_query = f"{explicit_bbox[0]}, {explicit_bbox[1]}, {explicit_bbox[2]}, {explicit_bbox[3]}"
+            else:
+                location_query = f"{lat:.4f}, {lon:.4f}"
+        else:
+            loc_patterns = [
+                r"\b(?:in|around|near|across|over|for|at)\s+([A-Z][a-zA-Z0-9\s,\-\.]+?)(?:\s+(?:for|to|with|using|and|\.|\?|$)|$)",
+                r"\b(?:in|around|near|across|over|for|at)\s+([a-zA-Z0-9\s,\-\.]+?)(?:\s+(?:for|to|with|using|and|\.|\?|$)|$)"
+            ]
+            for pat in loc_patterns:
+                match = re.search(pat, user_prompt)
+                if match:
+                    extracted = match.group(1).strip()
+                    if len(extracted) > 2 and extracted.lower() not in ["the", "a", "an", "all", "our", "general", "each"]:
+                        location_query = extracted
+                        break
+        if not location_query:
+            location_query = DEFAULT_LOCATION_NAME
 
         target_band_count = TASK_BAND_BUDGETS[task_type]
         priority_spectrum_domains = TASK_SPECTRUM_DOMAINS[task_type]
@@ -313,10 +457,11 @@ class VoxelStageZeroParser:
             "user_summary": user_summary,
         }
 
-    def parse(self, user_prompt: str) -> VoxelExecutionContract:
+    def parse(self, user_prompt: str, bbox: Optional[List[float]] = None) -> VoxelExecutionContract:
         """
         Sends prompt to LLM and returns structured Execution Contract.
         Uses Gemini SDK -> Gemini REST -> Rule-based fallback.
+        Supports explicit bbox override to avoid redundant network lookups.
         """
         raw = None
         llm_provider_used = "rule_based_fallback"
@@ -384,13 +529,18 @@ Return ONLY a valid raw JSON object matching this schema with NO markdown backti
             f"Configured Voxel satellite pipeline for {task_type.lower()} analysis across {location_query}."
         )
 
-        # Geocode to real BBOX coordinates
-        bbox, geocoder_used = self._geocode_to_bbox(location_query)
+        # Geocode to real BBOX coordinates (or use explicit bbox if provided)
+        if bbox is not None:
+            bbox_coords = [round(float(x), 4) for x in bbox]
+            geocoder_used = "Interactive Map / Explicit BBOX Input"
+            location_query = f"Custom AOI [{bbox_coords[0]:.4f}, {bbox_coords[1]:.4f}, {bbox_coords[2]:.4f}, {bbox_coords[3]:.4f}]"
+        else:
+            bbox_coords, geocoder_used = self._geocode_to_bbox(location_query)
 
         return VoxelExecutionContract(
             prompt=user_prompt,
             location_name=location_query,
-            bbox=bbox,
+            bbox=bbox_coords,
             task_type=task_type,
             target_band_count=int(target_band_count),
             priority_spectrum_domains=priority_domains,

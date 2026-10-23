@@ -27,6 +27,14 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+try:
+    import folium
+    from folium.plugins import Draw
+    from streamlit_folium import st_folium
+    HAS_FOLIUM = True
+except ImportError:
+    HAS_FOLIUM = False
+
 # Ensure project root in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -332,6 +340,12 @@ def render_dashboard():
             st.session_state["eo_query_input"] = q_str
             st.session_state["active_task_mode"] = "waterbody"
             st.session_state["task_profile_radio"] = "waterbody"
+            st.session_state["selected_coords"] = {"lat": 24.5584, "lon": 93.8132}
+            st.session_state["selected_bbox"] = [93.8007, 24.5459, 93.8257, 24.5709]
+            st.session_state["map_center"] = [24.5584, 93.8132]
+            st.session_state["map_zoom"] = 11
+            st.session_state["selection_type"] = "preset"
+            st.session_state["latest_pipeline_result"] = None
             st.rerun()
         if col_c2.button("📍 Jim Corbett (Forest)", use_container_width=True, key="btn_corbett"):
             q_str = "Assess forest canopy in Jim Corbett National Park, Uttarakhand"
@@ -339,6 +353,12 @@ def render_dashboard():
             st.session_state["eo_query_input"] = q_str
             st.session_state["active_task_mode"] = "forest_cover"
             st.session_state["task_profile_radio"] = "forest_cover"
+            st.session_state["selected_coords"] = {"lat": 29.5575, "lon": 78.8425}
+            st.session_state["selected_bbox"] = [78.8300, 29.5450, 78.8550, 29.5700]
+            st.session_state["map_center"] = [29.5575, 78.8425]
+            st.session_state["map_zoom"] = 11
+            st.session_state["selection_type"] = "preset"
+            st.session_state["latest_pipeline_result"] = None
             st.rerun()
         if col_c3.button("📍 Chilika Lake (Water)", use_container_width=True, key="btn_chilika"):
             q_str = "Identify water bodies around Chilika Lake, Odisha, India"
@@ -346,6 +366,12 @@ def render_dashboard():
             st.session_state["eo_query_input"] = q_str
             st.session_state["active_task_mode"] = "waterbody"
             st.session_state["task_profile_radio"] = "waterbody"
+            st.session_state["selected_coords"] = {"lat": 19.6625, "lon": 85.3625}
+            st.session_state["selected_bbox"] = [85.3500, 19.6500, 85.3750, 19.6750]
+            st.session_state["map_center"] = [19.6625, 85.3625]
+            st.session_state["map_zoom"] = 11
+            st.session_state["selection_type"] = "preset"
+            st.session_state["latest_pipeline_result"] = None
             st.rerun()
         if col_c4.button("📍 Western Ghats (Forest)", use_container_width=True, key="btn_ghats"):
             q_str = "Analyze forest canopy and tree cover around Western Ghats, Karnataka, India"
@@ -353,7 +379,289 @@ def render_dashboard():
             st.session_state["eo_query_input"] = q_str
             st.session_state["active_task_mode"] = "forest_cover"
             st.session_state["task_profile_radio"] = "forest_cover"
+            st.session_state["selected_coords"] = {"lat": 13.2125, "lon": 75.6125}
+            st.session_state["selected_bbox"] = [75.6000, 13.2000, 75.6250, 13.2250]
+            st.session_state["map_center"] = [13.2125, 75.6125]
+            st.session_state["map_zoom"] = 11
+            st.session_state["selection_type"] = "preset"
+            st.session_state["latest_pipeline_result"] = None
             st.rerun()
+
+        # ---------------------------------------------------------------------
+        # INTERACTIVE GEOGRAPHIC AOI SELECTOR (MAP & DRAW TOOL)
+        # ---------------------------------------------------------------------
+        st.markdown('<div style="font-size: 0.82rem; font-weight: 700; color: #64748B; margin-top: 14px; margin-bottom: 6px; text-transform: uppercase;">🗺️ Interactive Geographic AOI Selection (Click Point or Draw Rectangle):</div>', unsafe_allow_html=True)
+
+        if "map_center" not in st.session_state:
+            st.session_state["map_center"] = [22.5937, 78.9629]  # Geographic center of India
+        if "map_zoom" not in st.session_state:
+            st.session_state["map_zoom"] = 5
+        if "selected_bbox" not in st.session_state:
+            st.session_state["selected_bbox"] = [93.8007, 24.5459, 93.8257, 24.5709]
+        if "selected_coords" not in st.session_state:
+            st.session_state["selected_coords"] = {"lat": 24.5584, "lon": 93.8132}
+        if "selection_type" not in st.session_state:
+            st.session_state["selection_type"] = "preset"
+
+        cur_coords = st.session_state.get("selected_coords", {"lat": 24.5584, "lon": 93.8132})
+        cur_bbox = st.session_state.get("selected_bbox", [93.8007, 24.5459, 93.8257, 24.5709])
+
+        if HAS_FOLIUM:
+            m = folium.Map(
+                location=st.session_state["map_center"],
+                zoom_start=st.session_state["map_zoom"],
+                tiles="OpenStreetMap",
+                control_scale=True,
+            )
+
+            # Draw currently selected point marker
+            if cur_coords and "lat" in cur_coords and "lon" in cur_coords:
+                folium.Marker(
+                    [cur_coords["lat"], cur_coords["lon"]],
+                    popup=f"Center: {cur_coords['lat']:.4f}°N, {cur_coords['lon']:.4f}°E",
+                    tooltip=f"Selected Location: {cur_coords['lat']:.4f}, {cur_coords['lon']:.4f}",
+                    icon=folium.Icon(color="blue", icon="info-sign"),
+                ).add_to(m)
+
+            # Draw currently active AOI Bounding Box (User Selected)
+            if cur_bbox and len(cur_bbox) == 4:
+                b_min_lon, b_min_lat, b_max_lon, b_max_lat = cur_bbox
+                folium.Rectangle(
+                    bounds=[[b_min_lat, b_min_lon], [b_max_lat, b_max_lon]],
+                    color="#2563EB",
+                    weight=2,
+                    fill=True,
+                    fill_color="#3B82F6",
+                    fill_opacity=0.18,
+                    tooltip=f"Selected AOI BBOX: [{b_min_lon:.4f}, {b_min_lat:.4f}, {b_max_lon:.4f}, {b_max_lat:.4f}]",
+                ).add_to(m)
+
+            # Draw actual processed model footprint(s) if active result exists
+            active_res = st.session_state.get("latest_pipeline_result")
+            if active_res is not None:
+                multi_preds = active_res.diagnostics.get("multi_tile_predictions", [])
+                if multi_preds:
+                    for tp in multi_preds:
+                        tb = tp.get("bounds")
+                        if isinstance(tb, (list, tuple)) and len(tb) == 4:
+                            folium.Rectangle(
+                                bounds=[[tb[1], tb[0]], [tb[3], tb[2]]],
+                                color="#059669",
+                                weight=1.5,
+                                fill=True,
+                                fill_color="#10B981",
+                                fill_opacity=0.22,
+                                tooltip=f"Processed Tile: {tp.get('tile_id')} ({tp.get('predicted_class_name')})",
+                            ).add_to(m)
+                elif active_res.diagnostics.get("actual_processed_bbox"):
+                    pb = active_res.diagnostics["actual_processed_bbox"]
+                    if isinstance(pb, (list, tuple)) and len(pb) == 4:
+                        folium.Rectangle(
+                            bounds=[[pb[1], pb[0]], [pb[3], pb[2]]],
+                            color="#059669",
+                            weight=1.5,
+                            fill=True,
+                            fill_color="#10B981",
+                            fill_opacity=0.22,
+                            tooltip="Actual Processed Tile Footprint (256×256 px · 2.56 km)",
+                        ).add_to(m)
+
+            # Add Leaflet Draw controls: Rectangle and Marker
+            Draw(
+                export=False,
+                position="topleft",
+                draw_options={
+                    "polyline": False,
+                    "polygon": False,
+                    "circle": False,
+                    "circlemarker": False,
+                    "marker": True,
+                    "rectangle": True,
+                },
+                edit_options={"edit": False, "remove": True},
+            ).add_to(m)
+
+            map_output = st_folium(
+                m,
+                height=380,
+                use_container_width=True,
+                key="voxel_leaflet_map",
+                returned_objects=["last_clicked", "last_active_drawing"],
+            )
+
+            # Handle Map Interactions
+            if map_output is not None:
+                active_drawing = map_output.get("last_active_drawing")
+                if active_drawing and active_drawing.get("geometry"):
+                    geom = active_drawing["geometry"]
+                    g_type = geom.get("type")
+                    if g_type == "Polygon":
+                        poly_pts = geom["coordinates"][0]
+                        d_min_lon = round(min(p[0] for p in poly_pts), 4)
+                        d_max_lon = round(max(p[0] for p in poly_pts), 4)
+                        d_min_lat = round(min(p[1] for p in poly_pts), 4)
+                        d_max_lat = round(max(p[1] for p in poly_pts), 4)
+                        new_drawn_bbox = [d_min_lon, d_min_lat, d_max_lon, d_max_lat]
+                        if new_drawn_bbox != st.session_state.get("selected_bbox"):
+                            st.session_state["selected_bbox"] = new_drawn_bbox
+                            st.session_state["selected_coords"] = {
+                                "lat": round((d_min_lat + d_max_lat) / 2.0, 4),
+                                "lon": round((d_min_lon + d_max_lon) / 2.0, 4),
+                            }
+                            st.session_state["selection_type"] = "drawn_rectangle"
+                            st.session_state["latest_pipeline_result"] = None
+                            st.session_state["map_center"] = [
+                                st.session_state["selected_coords"]["lat"],
+                                st.session_state["selected_coords"]["lon"],
+                            ]
+                            current_task = st.session_state.get("task_profile_radio") or st.session_state.get("active_task_mode", "waterbody")
+                            task_verb = "water bodies" if current_task == "waterbody" else ("forest canopy" if current_task == "forest_cover" else "land cover")
+                            new_q = f"Assess {task_verb} across custom AOI [{d_min_lon}, {d_min_lat}, {d_max_lon}, {d_max_lat}]"
+                            st.session_state["active_query"] = new_q
+                            st.session_state["eo_query_input"] = new_q
+                            st.rerun()
+
+                    elif g_type == "Point":
+                        pt_lon, pt_lat = geom["coordinates"]
+                        from utils.llm_parser import compute_canonical_tile_bbox
+                        new_pt_bbox = compute_canonical_tile_bbox(pt_lat, pt_lon, 2560.0)
+                        if new_pt_bbox != st.session_state.get("selected_bbox"):
+                            st.session_state["selected_bbox"] = new_pt_bbox
+                            st.session_state["selected_coords"] = {"lat": round(pt_lat, 4), "lon": round(pt_lon, 4)}
+                            st.session_state["selection_type"] = "marker_point"
+                            st.session_state["latest_pipeline_result"] = None
+                            st.session_state["map_center"] = [round(pt_lat, 4), round(pt_lon, 4)]
+                            current_task = st.session_state.get("task_profile_radio") or st.session_state.get("active_task_mode", "waterbody")
+                            task_verb = "water bodies" if current_task == "waterbody" else ("forest canopy" if current_task == "forest_cover" else "land cover")
+                            new_q = f"Assess {task_verb} at lat: {pt_lat:.4f}, lon: {pt_lon:.4f}"
+                            st.session_state["active_query"] = new_q
+                            st.session_state["eo_query_input"] = new_q
+                            st.rerun()
+
+                elif map_output.get("last_clicked") and not active_drawing:
+                    click = map_output["last_clicked"]
+                    c_lat = round(click["lat"], 4)
+                    c_lon = round(click["lng"], 4)
+                    old_c = st.session_state.get("selected_coords", {})
+                    if abs(c_lat - old_c.get("lat", 0.0)) > 0.002 or abs(c_lon - old_c.get("lon", 0.0)) > 0.002:
+                        from utils.llm_parser import compute_canonical_tile_bbox
+                        new_click_bbox = compute_canonical_tile_bbox(c_lat, c_lon, 2560.0)
+                        st.session_state["selected_bbox"] = new_click_bbox
+                        st.session_state["selected_coords"] = {"lat": c_lat, "lon": c_lon}
+                        st.session_state["selection_type"] = "map_click"
+                        st.session_state["latest_pipeline_result"] = None
+                        st.session_state["map_center"] = [c_lat, c_lon]
+                        current_task = st.session_state.get("task_profile_radio") or st.session_state.get("active_task_mode", "waterbody")
+                        task_verb = "water bodies" if current_task == "waterbody" else ("forest canopy" if current_task == "forest_cover" else "land cover")
+                        new_q = f"Assess {task_verb} at lat: {c_lat:.4f}, lon: {c_lon:.4f}"
+                        st.session_state["active_query"] = new_q
+                        st.session_state["eo_query_input"] = new_q
+                        st.rerun()
+
+        # Selected Area of Interest Telemetry Bar
+        cur_bbox = st.session_state.get("selected_bbox", [93.8007, 24.5459, 93.8257, 24.5709])
+        cur_coords = st.session_state.get("selected_coords", {"lat": 24.5584, "lon": 93.8132})
+        sel_type = st.session_state.get("selection_type", "preset")
+
+        # Calculate physical spatial span using precise ellipsoidal distance
+        from utils.llm_parser import calculate_geographic_span
+        b_w_km, b_h_km = calculate_geographic_span(cur_bbox)
+        b_w_deg = cur_bbox[2] - cur_bbox[0]
+        b_h_deg = cur_bbox[3] - cur_bbox[1]
+
+        aoi_exceeds_limit = (b_w_deg > 0.08 or b_h_deg > 0.08)
+
+        hud_col1, hud_col2, hud_col3 = st.columns([1.2, 1.2, 1.0])
+        with hud_col1:
+            st.markdown(
+                f"""
+                <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 8px 12px; font-size: 0.82rem;">
+                    <div style="color: #64748B; font-weight: 700; font-size: 0.72rem; text-transform: uppercase;">Selected Center Coordinates</div>
+                    <div style="color: #0F172A; font-weight: 700; font-size: 0.95rem; margin-top: 2px;">{cur_coords['lat']:.4f}° N, {cur_coords['lon']:.4f}° E</div>
+                    <div style="color: #64748B; font-size: 0.76rem;">Mode: {sel_type.replace('_', ' ').title()}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with hud_col2:
+            st.markdown(
+                f"""
+                <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 8px 12px; font-size: 0.82rem;">
+                    <div style="color: #64748B; font-weight: 700; font-size: 0.72rem; text-transform: uppercase;">Geographic Bounding Box (BBOX)</div>
+                    <div style="color: #2563EB; font-weight: 700; font-size: 0.88rem; margin-top: 2px; font-family: monospace;">[{cur_bbox[0]:.4f}, {cur_bbox[1]:.4f}, {cur_bbox[2]:.4f}, {cur_bbox[3]:.4f}]</div>
+                    <div style="color: #64748B; font-size: 0.76rem;">Span: {b_w_km:.2f} km × {b_h_km:.2f} km</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with hud_col3:
+            est_w = max(1, int(math.ceil((b_w_km - 0.05) / 2.56)))
+            est_h = max(1, int(math.ceil((b_h_km - 0.05) / 2.56)))
+            est_tiles = est_w * est_h
+            if aoi_exceeds_limit:
+                status_color = "#DC2626"
+                status_text = "Exceeds Safe Limit"
+            elif est_tiles == 1:
+                status_color = "#059669"
+                status_text = "Valid (1 Tile · 2.56 km)"
+            else:
+                status_color = "#059669"
+                status_text = f"Valid ({est_tiles} Tiles · {est_w}×{est_h} grid)"
+            st.markdown(
+                f"""
+                <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 8px 12px; font-size: 0.82rem;">
+                    <div style="color: #64748B; font-weight: 700; font-size: 0.72rem; text-transform: uppercase;">Footprint Safety Status</div>
+                    <div style="color: {status_color}; font-weight: 700; font-size: 0.95rem; margin-top: 2px;">{status_text}</div>
+                    <div style="color: #64748B; font-size: 0.76rem;">Max: 8.0 km × 8.0 km / 4 tiles</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        if aoi_exceeds_limit:
+            st.warning(f"⚠️ Selected AOI ({b_w_km:.1f} km × {b_h_km:.1f} km) exceeds the maximum single-scene memory safety limit (8.0 km × 8.0 km). Please click a point or draw a smaller rectangle.")
+
+        # Manual Coordinate Entry / BBOX Editor in Expander
+        with st.expander("📝 Manual Coordinate Entry / BBOX Editor", expanded=False):
+            m_col1, m_col2 = st.columns([3, 1])
+            with m_col1:
+                manual_coord_str = st.text_input(
+                    "Enter Decimal Lat, Lon or [min_lon, min_lat, max_lon, max_lat]:",
+                    value=f"{cur_coords['lat']:.4f}, {cur_coords['lon']:.4f}",
+                    help="Paste decimal coordinates e.g. 16.5780, 79.3120 or bounding box e.g. [79.2995, 16.5655, 79.3245, 16.5905]",
+                    key="manual_coord_field",
+                )
+            with m_col2:
+                st.markdown('<div style="margin-top: 24px;"></div>', unsafe_allow_html=True)
+                apply_coord_btn = st.button("Apply Coordinates", use_container_width=True, key="apply_coord_btn")
+                if apply_coord_btn and manual_coord_str:
+                    try:
+                        from utils.llm_parser import parse_geographic_coordinates
+                        parsed = parse_geographic_coordinates(manual_coord_str)
+                        if parsed:
+                            p_lat, p_lon, p_bbox, _ = parsed
+                            if p_bbox:
+                                st.session_state["selected_bbox"] = p_bbox
+                                st.session_state["selected_coords"] = {"lat": p_lat, "lon": p_lon}
+                            else:
+                                from utils.llm_parser import compute_canonical_tile_bbox
+                                st.session_state["selected_bbox"] = compute_canonical_tile_bbox(p_lat, p_lon, 2560.0)
+                                st.session_state["selected_coords"] = {"lat": p_lat, "lon": p_lon}
+                            st.session_state["map_center"] = [p_lat, p_lon]
+                            st.session_state["map_zoom"] = 11
+                            st.session_state["selection_type"] = "manual_entry"
+                            st.session_state["latest_pipeline_result"] = None
+                            current_task = st.session_state.get("task_profile_radio") or st.session_state.get("active_task_mode", "waterbody")
+                            task_verb = "water bodies" if current_task == "waterbody" else ("forest canopy" if current_task == "forest_cover" else "land cover")
+                            new_q = f"Assess {task_verb} at lat: {p_lat:.4f}, lon: {p_lon:.4f}"
+                            st.session_state["active_query"] = new_q
+                            st.session_state["eo_query_input"] = new_q
+                            st.success(f"Applied coordinates: {p_lat:.4f}, {p_lon:.4f}")
+                            st.rerun()
+                        else:
+                            st.error("Could not parse coordinates. Format as 'lat, lon' or '[min_lon, min_lat, max_lon, max_lat]'.")
+                    except Exception as ex:
+                        st.error(f"Coordinate validation error: {ex}")
 
         st.markdown('<div style="margin-top: 10px;"></div>', unsafe_allow_html=True)
         query_input = st.text_input(
@@ -368,8 +676,9 @@ def render_dashboard():
         with q_col1:
             task_mode_options = ["auto", "waterbody", "forest_cover"]
             default_task_idx = 0
-            if st.session_state.get("active_task_mode") in task_mode_options:
-                default_task_idx = task_mode_options.index(st.session_state["active_task_mode"])
+            cur_stored = st.session_state.get("task_profile_radio") or st.session_state.get("active_task_mode", "auto")
+            if cur_stored in task_mode_options:
+                default_task_idx = task_mode_options.index(cur_stored)
 
             task_mode = st.radio(
                 "Task Profile Mode:",
@@ -380,12 +689,15 @@ def render_dashboard():
                 help="Automatically routes to the appropriate physics domain and verified checkpoint.",
                 key="task_profile_radio",
             )
+            if task_mode != st.session_state.get("active_task_mode"):
+                st.session_state["active_task_mode"] = task_mode
+                st.session_state["latest_pipeline_result"] = None
         with q_col2:
             st.markdown('<div style="margin-top: 24px;"></div>', unsafe_allow_html=True)
             launch_btn = st.button("▶ Run Analysis", type="primary", use_container_width=True, key="run_analysis_btn")
 
         # Advanced Settings in Expander
-        with st.expander("⚙️ Advanced Analysis & Optimization Settings", expanded=False):
+        with st.expander("⚙️ Advanced Analysis, STAC & Optimization Settings", expanded=False):
             ac1, ac2 = st.columns(2)
             with ac1:
                 exec_mode = st.radio(
@@ -401,6 +713,12 @@ def render_dashboard():
                     help="Runs fresh Binary Whale Optimization on the scene tensor to discover an exploratory spectral subset. Validated model applies verified calibration mask.",
                     key="run_bwoa_checkbox",
                 )
+                allow_stac_fallback = st.checkbox(
+                    "Enable STAC Fallback Relaxation",
+                    value=True,
+                    help="Allows controlled relaxation of cloud cover (<=40%) or date range if initial search finds 0 scenes.",
+                    key="allow_stac_fallback_checkbox",
+                )
             with ac2:
                 run_shap = st.checkbox(
                     "Compute Permutation SHAP Attributions",
@@ -414,33 +732,89 @@ def render_dashboard():
                     help="Queries nearest-neighbor latent representations (1216-dim) in the EuroSAT benchmark corpus.",
                     key="run_faiss_checkbox",
                 )
+                stac_cloud_cover = st.slider(
+                    "Max Cloud Cover (%):",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=20.0,
+                    step=5.0,
+                    help="Maximum acceptable cloud cover threshold for Sentinel-2 scene search.",
+                    key="stac_cloud_slider",
+                )
+
+            st.markdown("<div style='font-size: 0.82rem; font-weight: 600; color: #475569; margin-top: 10px; margin-bottom: 4px;'>🛰️ Sentinel-2 Acquisition Date Range (AWS Earth Search STAC)</div>", unsafe_allow_html=True)
+            dc1, dc2 = st.columns(2)
+            with dc1:
+                stac_start_date = st.text_input("Start Date (YYYY-MM-DD):", value="2023-01-01", key="stac_start_date_input")
+            with dc2:
+                stac_end_date = st.text_input("End Date (YYYY-MM-DD):", value="2024-12-31", key="stac_end_date_input")
 
         st.markdown('</div>', unsafe_allow_html=True)
 
         # Pipeline Execution Handler
         if launch_btn:
-            with st.spinner("Executing VOXEL Earth Observation Pipeline (Geocoding ➔ STAC ➔ Optimization ➔ FusionNet)..."):
-                try:
-                    pipeline = VoxelPipeline(default_mode=exec_mode, verbose=False)
-                    res: VoxelPipelineResult = pipeline.run(
-                        query=query_input,
-                        mode=exec_mode,
-                        task_override=None if task_mode == "auto" else task_mode,
-                        explain_shap=run_shap,
-                        run_faiss=run_faiss,
-                        optimize_bands=run_bwoa,
-                    )
-                    st.session_state["latest_pipeline_result"] = res
-                    st.session_state["active_query"] = query_input
-                except Exception as e:
-                    st.error(f"Pipeline Execution Failed: {str(e)}")
-                    with st.expander("Diagnostic Traceback"):
-                        st.code(traceback.format_exc())
+            if aoi_exceeds_limit:
+                st.error("Cannot run analysis: Selected AOI exceeds the maximum safe single-scene limit (8.0 km × 8.0 km). Please select a smaller rectangle or click a point.")
+            else:
+                # Clear any prior result immediately so that during the execution spinner,
+                # no stale result is displayed to the user
+                st.session_state["latest_pipeline_result"] = None
+                with st.spinner("Executing VOXEL Earth Observation Pipeline (Geocoding ➔ STAC ➔ Optimization ➔ FusionNet)..."):
+                    try:
+                        pipeline = VoxelPipeline(default_mode=exec_mode, verbose=False)
+                        target_task_override = None if task_mode == "auto" else task_mode
+                        res: VoxelPipelineResult = pipeline.run(
+                            query=query_input,
+                            mode=exec_mode,
+                            task_override=target_task_override,
+                            bbox=st.session_state.get("selected_bbox"),
+                            explain_shap=run_shap,
+                            run_faiss=run_faiss,
+                            optimize_bands=run_bwoa,
+                            start_date=stac_start_date,
+                            end_date=stac_end_date,
+                            cloud_cover=stac_cloud_cover,
+                            allow_fallback=allow_stac_fallback,
+                        )
+                        # Attach UI request signature for deterministic staleness validation
+                        res.diagnostics["ui_request_signature"] = {
+                            "task_mode": task_mode,
+                            "effective_task": res.task_type,
+                            "bbox": st.session_state.get("selected_bbox"),
+                            "coords": st.session_state.get("selected_coords"),
+                            "query": query_input,
+                        }
+                        st.session_state["latest_pipeline_result"] = res
+                        st.session_state["active_query"] = query_input
+                    except Exception as e:
+                        st.error(f"Pipeline Execution Failed: {str(e)}")
+                        with st.expander("Diagnostic Traceback"):
+                            st.code(traceback.format_exc())
 
         # Render Active or Persisted Results
         res: Optional[VoxelPipelineResult] = st.session_state.get("latest_pipeline_result")
 
+        # Staleness & Task Alignment Guard (Priority 3, Tests C & D)
+        is_stale_task = False
+        is_stale_aoi = False
         if res is not None:
+            is_stale_task = (task_mode != "auto" and res.task_type != task_mode)
+
+            cur_bbox = st.session_state.get("selected_bbox")
+            req_sig = res.diagnostics.get("ui_request_signature", {})
+            sig_bbox = req_sig.get("bbox") or res.resolved_location.get("bbox")
+            if cur_bbox and sig_bbox:
+                is_stale_aoi = any(abs(a - b) > 0.0005 for a, b in zip(cur_bbox, sig_bbox))
+
+            if is_stale_task or is_stale_aoi:
+                res = None
+                st.session_state["latest_pipeline_result"] = None
+
+        if res is not None and not is_stale_task and not is_stale_aoi:
+            # Task mismatch diagnostic note (Priority 2)
+            mismatch_note = res.diagnostics.get("task_mismatch_note")
+            if mismatch_note:
+                st.warning(f"ℹ️ **Task Routing Note:** {mismatch_note}")
             # Interpretability Pipeline Flow Banner
             st.markdown(
                 """
@@ -450,6 +824,12 @@ def render_dashboard():
                 """,
                 unsafe_allow_html=True,
             )
+
+            # Visible STAC search relaxation notice (Fix 3, Constraint 5)
+            mod1_meta = res.diagnostics.get("module1_metadata", {})
+            if mod1_meta.get("fallback_applied") and mod1_meta.get("warnings"):
+                for w in mod1_meta["warnings"]:
+                    st.info(f"ℹ️ **STAC Search Criteria Relaxation:** {w}")
 
             # 1. Prediction & Provenance Banner
             if res.prediction and res.prediction.get("predicted_class_name") != "Prediction unavailable":
@@ -546,6 +926,12 @@ def render_dashboard():
             dims_str = f"{res.input_tensor_shape[1]} × {res.input_tensor_shape[2]} px (2.56 km² Footprint)" if len(res.input_tensor_shape) >= 3 else "256 × 256 px"
             res_str = "10 m / pixel (GSD)"
             bbox_coords = res.resolved_location.get("bbox", "N/A")
+            actual_proc_bbox = res.diagnostics.get("actual_processed_bbox", bbox_coords)
+            num_analyzed_tiles = res.diagnostics.get("actual_processed_tile_count") or len(res.diagnostics.get("multi_tile_predictions", [])) or (res.diagnostics.get("total_scene_tiles") or 1)
+            tile_count_str = f"{num_analyzed_tiles} Tile{'s' if num_analyzed_tiles > 1 else ''} ({num_analyzed_tiles * 2.56:.2f} km² Analyzed)"
+            coverage_label = f"Full AOI Coverage ({num_analyzed_tiles} Tiles)" if num_analyzed_tiles > 1 else "Canonical 1-Tile Coverage (2.56 km)"
+            exec_ckpt_path = res.checkpoint_path or f"checkpoints/real_{res.task_type}/best_fusion_net.pth"
+            exec_ckpt_name = os.path.basename(exec_ckpt_path)
 
             st.markdown('<div class="voxel-card" style="margin-top: 14px;">', unsafe_allow_html=True)
             st.markdown('<div class="voxel-card-header">REAL SATELLITE PROVENANCE &amp; GEOGRAPHICAL LOCATOR</div>', unsafe_allow_html=True)
@@ -555,14 +941,16 @@ def render_dashboard():
                 st.markdown(
                     f"""
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; font-size: 0.82rem; line-height: 1.6; color: #475569;">
-                        <div><b>User Query / Target:</b><br><span style="color: #0F172A;">{res.resolved_location.get('name', 'N/A')}</span></div>
+                        <div><b>Selected AOI (BBOX):</b><br><code>{bbox_coords}</code></div>
+                        <div><b>Actual Processed BBOX:</b><br><code>{actual_proc_bbox}</code></div>
                         <div><b>Scene ID:</b> <code>{scene_id}</code></div>
-                        <div><b>Coordinates (BBOX):</b><br><code>{bbox_coords}</code></div>
                         <div><b>Acquisition Date:</b><br><span style="color: #0F172A;">{acq_date}</span></div>
+                        <div><b>Coverage Status:</b><br><span class="voxel-badge-success">{coverage_label}</span></div>
+                        <div><b>Processed Tile Count:</b><br><span style="color: #0F172A; font-weight: 600;">{tile_count_str}</span></div>
                         <div><b>STAC Data Provider:</b><br><span style="color: #0F172A;">{stac_prov}</span></div>
                         <div><b>Scene Cloud Cover:</b><br><span style="color: #0F172A;">{cloud_str}</span></div>
                         <div><b>Acquisition Status:</b><br><span class="voxel-badge-success">{cache_stat}</span></div>
-                        <div><b>Dimensions &amp; Resolution:</b><br><span style="color: #0F172A;">{dims_str} · {res_str}</span></div>
+                        <div><b>Executed Checkpoint:</b><br><code style="font-size: 0.75rem;">{exec_ckpt_name}</code></div>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -577,6 +965,36 @@ def render_dashboard():
                 else:
                     st.info("Interactive locator unavailable (no geographic bounding box resolved).")
             st.markdown('</div>', unsafe_allow_html=True)
+
+            # Multi-Tile Spatial Breakdown (Requirements 3 & 4)
+            multi_preds = res.diagnostics.get("multi_tile_predictions", [])
+            if multi_preds and len(multi_preds) > 1:
+                st.markdown('<div class="voxel-card" style="margin-top: 14px;">', unsafe_allow_html=True)
+                st.markdown(f'<div class="voxel-card-header">MULTI-TILE SPATIAL BREAKDOWN ({len(multi_preds)} TILES ANALYZED)</div>', unsafe_allow_html=True)
+                st.markdown(
+                    "<div style='font-size: 0.82rem; color: #475569; margin-bottom: 10px; line-height: 1.5;'>"
+                    "The selected rectangular Area of Interest spans multiple Sentinel-2 256×256 px tiles. "
+                    "In adherence to scientific integrity, each spatial tile is evaluated independently with the calibrated CNN–ViT FusionNet. "
+                    "Predictions are reported individually per tile rather than aggregated into an uncalibrated whole-region score:"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+                tile_rows = []
+                for tp in multi_preds:
+                    tb = tp.get("bounds", "N/A")
+                    if isinstance(tb, (list, tuple)) and len(tb) == 4:
+                        tb_str = f"[{tb[0]:.4f}, {tb[1]:.4f}, {tb[2]:.4f}, {tb[3]:.4f}]"
+                    else:
+                        tb_str = str(tb)
+                    tile_rows.append({
+                        "Tile ID": tp["tile_id"],
+                        "Geographic Bounds": tb_str,
+                        "Predicted Class": tp["predicted_class_name"],
+                        "Model Confidence": f"{tp['confidence_pct']:.2f}%",
+                    })
+                st.dataframe(pd.DataFrame(tile_rows), use_container_width=True, hide_index=True)
+                st.caption(f"Spatial Footprint: {len(multi_preds)} non-overlapping 256×256 px tiles (2.56 km² each). Top tile is displayed as primary preview.")
+                st.markdown('</div>', unsafe_allow_html=True)
 
             # 4. ACTUAL SATELLITE RGB AND SPECTRAL INDICES (SIDE-BY-SIDE)
             st.markdown('<div style="margin-top: 14px;"></div>', unsafe_allow_html=True)
@@ -624,7 +1042,7 @@ def render_dashboard():
                 else:
                     st.info("Calibrated spectral tensor unavailable for index computation.")
                     formula = "N/A"
-                st.caption(f"Spectral-index visualization ({formula}). Physics reflectance ratio — not AI segmentation or ground truth. (Note: Does not quantify water levels, depths, or canopy percentages).")
+                st.caption(f"Spectral-index visualization ({formula}). Deterministic radiometric physical reflectance ratio from identical scene — not a CNN–ViT classification output or segmentation mask. (Note: Does not quantify water levels, depths, or canopy percentages).")
                 st.markdown('</div>', unsafe_allow_html=True)
 
             # 5. REAL SPECTRAL SIGNATURE PLOT & BWOA OPTIMIZATION EVIDENCE

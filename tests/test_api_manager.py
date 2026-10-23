@@ -89,8 +89,9 @@ class TestAPIManager(unittest.TestCase):
         self.assertTrue(report["stage_0_llm"]["offline_fallback_ready"])
         self.assertTrue(report["stage_1_ingestion"]["nominatim_geocoding_ready"])
 
+    @patch("utils.llm_parser._geocode_location_live", return_value=(18.95, 72.82, None, "Mock Nominatim"))
     @patch.dict(os.environ, {}, clear=True)
-    def test_parser_integration_without_api_keys(self):
+    def test_parser_integration_without_api_keys(self, mock_geocode):
         """Verifies Stage 0 query compilation works seamlessly in offline mode."""
         mgr = APIManager(auto_load=False)
         parser = VoxelStageZeroParser(api_manager=mgr)

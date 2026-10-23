@@ -5,6 +5,7 @@ Requires no live internet connection (uses mocking).
 
 import pytest
 import os
+import numpy as np
 from unittest.mock import patch, MagicMock
 from module1_ingestion.stac_downloader import CopernicusSTACProvider, BhuNidhiProvider
 from module1_ingestion.config import SENTINEL_2_L2A_COLLECTION
@@ -240,4 +241,117 @@ def test_earth_search_download_bands_mocked(mock_get, tmp_path):
         dest_file = target_dir / f"{b_name}.tif"
         assert os.path.exists(dest_file)
         assert band_paths[b_name] == str(dest_file)
+
+
+# -----------------------------------------------------------------------------
+# Fix 3: Dynamic Sentinel-2 Search Window & Fallback Tests
+# -----------------------------------------------------------------------------
+def test_fix3_dynamic_search_lowest_cloud_cover_selection():
+    """Verify that multiple candidate STAC scenes are sorted by cloud cover ascending, picking lowest."""
+    from voxel_pipeline import VoxelPipeline
+
+    pipeline = VoxelPipeline(default_mode="offline", verbose=False)
+
+    item1 = MagicMock()
+    item1.id = "S2_high_cloud"
+    item1.properties = {"eo:cloud_cover": 18.5}
+    item1.datetime = None
+    item1.collection_id = "sentinel-2-l2a"
+    item1.assets = {pipeline.earth_search_stac.get_band_asset_key(b): MagicMock() for b in ["B02", "B03", "B04", "B08"]}
+
+    item2 = MagicMock()
+    item2.id = "S2_lowest_cloud"
+    item2.properties = {"eo:cloud_cover": 1.2}
+    item2.datetime = None
+    item2.collection_id = "sentinel-2-l2a"
+    item2.assets = {pipeline.earth_search_stac.get_band_asset_key(b): MagicMock() for b in ["B02", "B03", "B04", "B08"]}
+
+    with patch.object(pipeline.earth_search_stac, "search_sentinel2_l2a", return_value=[item1, item2]), \
+         patch.object(pipeline.earth_search_stac, "download_bands", return_value={"B02": "mock"}), \
+         patch("voxel_pipeline.Module1Pipeline.for_module3") as mock_mod1:
+
+        mock_tile_res = MagicMock()
+        mock_tile_res.processed_tensor = np.zeros((13, 256, 256), dtype=np.float32)
+        mock_tile_res.tile_id = "tile_001"
+        mock_tile_res.diagnostics = {}
+        mock_instance = MagicMock()
+        mock_instance.process_scene.return_value = [mock_tile_res]
+        mock_mod1.return_value = mock_instance
+
+        tensor, meta, errors = pipeline.acquire_and_process_real_satellite_data(
+            bbox=[72.8, 18.9, 72.9, 19.0],
+            start_date="2024-03-01",
+            end_date="2024-04-30",
+            cloud_cover=20.0,
+        )
+
+        assert errors == []
+        assert meta["stac_item_id"] == "S2_lowest_cloud"
+        assert meta["cloud_cover"] == 1.2
+        assert meta["search_start_date"] == "2024-03-01"
+        assert meta["search_end_date"] == "2024-04-30"
+
+
+def test_fix3_controlled_fallback_relaxation():
+    """Verify that when initial search has 0 scenes, controlled relaxation runs and warns user."""
+    from voxel_pipeline import VoxelPipeline
+
+    pipeline = VoxelPipeline(default_mode="offline", verbose=False)
+
+    item_relaxed = MagicMock()
+    item_relaxed.id = "S2_relaxed_scene"
+    item_relaxed.properties = {"eo:cloud_cover": 32.0}
+    item_relaxed.datetime = None
+    item_relaxed.collection_id = "sentinel-2-l2a"
+    item_relaxed.assets = {pipeline.earth_search_stac.get_band_asset_key(b): MagicMock() for b in ["B02", "B03", "B04", "B08"]}
+
+    # First call returns [], second call (cloud_cover=40.0) returns [item_relaxed]
+    search_mock = MagicMock(side_effect=[[], [item_relaxed]])
+
+    with patch.object(pipeline.earth_search_stac, "search_sentinel2_l2a", search_mock), \
+         patch.object(pipeline.earth_search_stac, "download_bands", return_value={"B02": "mock"}), \
+         patch("voxel_pipeline.Module1Pipeline.for_module3") as mock_mod1:
+
+        mock_tile_res = MagicMock()
+        mock_tile_res.processed_tensor = np.zeros((13, 256, 256), dtype=np.float32)
+        mock_tile_res.tile_id = "tile_001"
+        mock_tile_res.diagnostics = {}
+        mock_instance = MagicMock()
+        mock_instance.process_scene.return_value = [mock_tile_res]
+        mock_mod1.return_value = mock_instance
+
+        tensor, meta, errors = pipeline.acquire_and_process_real_satellite_data(
+            bbox=[72.8, 18.9, 72.9, 19.0],
+            start_date="2024-01-01",
+            end_date="2024-02-01",
+            cloud_cover=10.0,
+            allow_fallback=True,
+        )
+
+        assert errors == []
+        assert meta["fallback_applied"] is True
+        assert len(meta["warnings"]) >= 1
+        assert "Controlled fallback relaxed" in meta["warnings"][0]
+        assert meta["stac_item_id"] == "S2_relaxed_scene"
+
+
+def test_fix3_fallback_disabled_fails_cleanly():
+    """Verify that when allow_fallback is False, 0 items immediately fails without relaxation."""
+    from voxel_pipeline import VoxelPipeline
+
+    pipeline = VoxelPipeline(default_mode="offline", verbose=False)
+
+    with patch.object(pipeline.earth_search_stac, "search_sentinel2_l2a", return_value=[]):
+        tensor, meta, errors = pipeline.acquire_and_process_real_satellite_data(
+            bbox=[72.8, 18.9, 72.9, 19.0],
+            start_date="2024-01-01",
+            end_date="2024-02-01",
+            cloud_cover=10.0,
+            allow_fallback=False,
+        )
+
+        assert tensor is None
+        assert len(errors) == 1
+        assert "Fallback relaxation disabled" in errors[0]
+
 
