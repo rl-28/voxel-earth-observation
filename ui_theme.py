@@ -948,14 +948,24 @@ def compute_spectral_signature_figure(tensor: np.ndarray, selected_bands: List[s
 plot_dark_training_curve = plot_light_training_curve
 
 
+_TELEMETRY_CACHE: Dict[str, Any] = {}
+
 def get_system_telemetry_status(project_root: Path) -> Dict[str, Dict[str, Any]]:
     """
     Lightweight, genuine module health check & last-verified telemetry audit.
     Does NOT execute expensive satellite downloads, BWOA search, or neural inference.
     Inspects imports, cached artifacts, model weight files, and actual pytest cache records.
+    Cached for 30s in memory to ensure fast sub-millisecond dashboard renders.
     """
     import json
     import datetime
+    import time
+
+    cache_key = str(project_root.resolve())
+    now = time.time()
+    cached = _TELEMETRY_CACHE.get(cache_key)
+    if cached and (now - cached.get("time", 0.0) < 30.0):
+        return cached["data"]
 
     # 1. Module 1: Satellite Ingestion Health Check (Lightweight)
     try:
@@ -1068,7 +1078,7 @@ def get_system_telemetry_status(project_root: Path) -> Dict[str, Dict[str, Any]]
     mod2_dict = {"label": "Module 2 (BWOA)", "status": m2_status, "detail": m2_detail, "class": m2_class}
     mod3_dict = {"label": "Module 3 (FusionNet)", "status": m3_status, "detail": m3_detail, "class": m3_class}
     ver_dict = {"label": "Verification Suite", "status": v_status, "timestamp": v_timestamp, "source": v_source, "class": v_class}
-    return {
+    res_dict = {
         "module1": mod1_dict,
         "module2": mod2_dict,
         "module3": mod3_dict,
@@ -1077,6 +1087,8 @@ def get_system_telemetry_status(project_root: Path) -> Dict[str, Dict[str, Any]]
         "m3": mod3_dict,
         "verification": ver_dict,
     }
+    _TELEMETRY_CACHE[cache_key] = {"data": res_dict, "time": now}
+    return res_dict
 
 
 def get_verified_runtime_status(project_root: Path) -> Dict[str, Dict[str, str]]:

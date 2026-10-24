@@ -1,0 +1,2 @@
+epoch,lr,train_loss,train_oa,train_f1,train_miou,val_loss,val_oa,val_f1,val_miou,time_sec,vram_alloc_gb,vram_reserved_gb
+1,1.000000e-04,0.6114,64.71,60.58,44.66,0.6261,75.00,42.86,37.50,86.05,0.000,0.000

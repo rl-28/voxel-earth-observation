@@ -7,8 +7,21 @@ font = "sans serif"
 
 [browser]
 gatherUsageStats = false
+serverAddress = "localhost"
+serverPort = 8501
 
 [server]
 headless = true
 enableCORS = false
 enableXsrfProtection = false
+address = "127.0.0.1"
+port = 8501
+fileWatcherType = "none"
+runOnSave = false
+enableStaticServing = true
+maxUploadSize = 200
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = false
+

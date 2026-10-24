@@ -11,7 +11,6 @@ __pycache__/
 coverage.xml
 
 # Experiment results, temporary files & logs
-results/
 scratch/
 temp/
 tmp/
@@ -44,15 +43,6 @@ data/evaluation/**/*.jp2
 *.nc
 *.hdf
 *.hdf5
-
-# Model checkpoints & binary index artifacts
-*.pth
-*.pt
-*.pth.tar
-*.faiss
-*.h5
-*.onnx
-checkpoints/splits.json
 
 # Environment variables & security credentials
 .env

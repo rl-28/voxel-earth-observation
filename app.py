@@ -767,7 +767,11 @@ def render_dashboard():
                 st.session_state["latest_pipeline_result"] = None
                 with st.spinner("Executing VOXEL Earth Observation Pipeline (Geocoding ➔ STAC ➔ Optimization ➔ FusionNet)..."):
                     try:
-                        pipeline = VoxelPipeline(default_mode=exec_mode, verbose=False)
+                        if "cached_voxel_pipelines" not in st.session_state:
+                            st.session_state["cached_voxel_pipelines"] = {}
+                        if exec_mode not in st.session_state["cached_voxel_pipelines"]:
+                            st.session_state["cached_voxel_pipelines"][exec_mode] = VoxelPipeline(default_mode=exec_mode, verbose=False)
+                        pipeline = st.session_state["cached_voxel_pipelines"][exec_mode]
                         target_task_override = None if task_mode == "auto" else task_mode
                         res: VoxelPipelineResult = pipeline.run(
                             query=query_input,
@@ -1042,9 +1046,16 @@ def render_dashboard():
                 st.markdown(f'<div class="voxel-card-header">{idx_header}</div>', unsafe_allow_html=True)
                 calib_tensor = res.diagnostics.get("calibrated_tensor")
                 if calib_tensor is not None and calib_tensor.shape[0] == 13:
-                    fig_idx, idx_name, formula = compute_spectral_index_figure(calib_tensor, res.task_type)
-                    st.pyplot(fig_idx, use_container_width=True)
-                    plt.close(fig_idx)
+                    if "_cached_fig_idx_bytes" not in res.diagnostics:
+                        fig_idx, idx_name, formula = compute_spectral_index_figure(calib_tensor, res.task_type)
+                        import io
+                        buf = io.BytesIO()
+                        fig_idx.savefig(buf, format="png", bbox_inches="tight", dpi=130)
+                        plt.close(fig_idx)
+                        res.diagnostics["_cached_fig_idx_bytes"] = buf.getvalue()
+                        res.diagnostics["_cached_fig_idx_formula"] = formula
+                    st.image(res.diagnostics["_cached_fig_idx_bytes"], use_container_width=True)
+                    formula = res.diagnostics.get("_cached_fig_idx_formula", "N/A")
                 else:
                     st.info("Calibrated spectral tensor unavailable for index computation.")
                     formula = "N/A"
@@ -1060,9 +1071,14 @@ def render_dashboard():
                 st.markdown('<div class="voxel-card-header">MEASURED SPECTRAL REFLECTANCE SIGNATURE</div>', unsafe_allow_html=True)
                 calib_tensor = res.diagnostics.get("calibrated_tensor")
                 if calib_tensor is not None and calib_tensor.shape[0] == 13:
-                    fig_spec = compute_spectral_signature_figure(calib_tensor, res.selected_bands)
-                    st.pyplot(fig_spec, use_container_width=True)
-                    plt.close(fig_spec)
+                    if "_cached_fig_spec_bytes" not in res.diagnostics:
+                        fig_spec = compute_spectral_signature_figure(calib_tensor, res.selected_bands)
+                        import io
+                        buf = io.BytesIO()
+                        fig_spec.savefig(buf, format="png", bbox_inches="tight", dpi=130)
+                        plt.close(fig_spec)
+                        res.diagnostics["_cached_fig_spec_bytes"] = buf.getvalue()
+                    st.image(res.diagnostics["_cached_fig_spec_bytes"], use_container_width=True)
                 else:
                     st.info("Spectral tensor unavailable for reflectance profiling.")
                 st.caption("Tile-mean BOA surface reflectance with ±1σ spatial variance envelope across 256×256 footprint. 10m/20m/60m bands resampled to 10m grid. B10 Cirrus (1375 nm) refused in L2A BOA. Selected task bands marked with green highlight (*).")
@@ -1133,18 +1149,23 @@ def render_dashboard():
                     band_pcts = [b["percentage"] for b in top_bands]
 
                     if any(p > 0.0 for p in band_pcts):
-                        fig, ax = plt.subplots(figsize=(7, 2.8), dpi=150)
-                        y_pos = np.arange(len(band_names))
-                        ax.barh(y_pos, band_pcts, color="#2563EB", align="center", edgecolor="#1D4ED8", height=0.55)
-                        ax.set_yticks(y_pos)
-                        ax.set_yticklabels(band_names)
-                        ax.invert_yaxis()
-                        ax.set_xlabel("Relative Sensitivity Attribution (%)")
-                        ax.set_title("Single-Tile Spatial Permutation SHAP Attribution")
-                        style_light_figure(fig, ax)
-                        fig.tight_layout()
-                        st.pyplot(fig)
-                        plt.close(fig)
+                        if "_cached_shap_fig_bytes" not in res.diagnostics:
+                            fig, ax = plt.subplots(figsize=(7, 2.8), dpi=140)
+                            y_pos = np.arange(len(band_names))
+                            ax.barh(y_pos, band_pcts, color="#2563EB", align="center", edgecolor="#1D4ED8", height=0.55)
+                            ax.set_yticks(y_pos)
+                            ax.set_yticklabels(band_names)
+                            ax.invert_yaxis()
+                            ax.set_xlabel("Relative Sensitivity Attribution (%)")
+                            ax.set_title("Single-Tile Spatial Permutation SHAP Attribution")
+                            style_light_figure(fig, ax)
+                            fig.tight_layout()
+                            import io
+                            buf = io.BytesIO()
+                            fig.savefig(buf, format="png", bbox_inches="tight", dpi=140)
+                            plt.close(fig)
+                            res.diagnostics["_cached_shap_fig_bytes"] = buf.getvalue()
+                        st.image(res.diagnostics["_cached_shap_fig_bytes"], use_container_width=True)
                     else:
                         st.info("Attribution: Prediction confidence is invariant to spatial pixel permutation across channels on this tile.")
 

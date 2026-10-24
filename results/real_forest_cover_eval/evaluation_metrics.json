@@ -1,0 +1,34 @@
+{
+  "oa": 94.73684210526315,
+  "balanced_accuracy": 91.66666666666667,
+  "macro_f1": 93.60269360269359,
+  "miou": 88.09523809523809,
+  "majority_baseline_oa": 68.42105263157895,
+  "majority_baseline_f1": 40.625,
+  "majority_class": "Forest",
+  "per_class": {
+    "Non-forest": {
+      "precision": 1.0,
+      "recall": 0.8333333333333334,
+      "f1": 0.9090909090909091,
+      "support": 6
+    },
+    "Forest": {
+      "precision": 0.9285714285714286,
+      "recall": 1.0,
+      "f1": 0.9629629629629629,
+      "support": 13
+    }
+  },
+  "confusion_matrix": [
+    [
+      5,
+      1
+    ],
+    [
+      0,
+      13
+    ]
+  ],
+  "confusion_matrix_path": "results/real_forest_cover_eval\\confusion_matrix.png"
+}

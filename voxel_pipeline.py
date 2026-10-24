@@ -83,6 +83,19 @@ from config.constants import (
 # Configurable Default Sentinel-2 STAC Search Window (Fix 3)
 DEFAULT_STAC_START_DATE = "2023-01-01"
 DEFAULT_STAC_END_DATE = "2024-12-31"
+
+# Fast in-memory checkpoint cache to eliminate repeated disk I/O and unpickling
+_MODEL_CHECKPOINT_CACHE: Dict[str, Any] = {}
+
+def get_cached_checkpoint(ckpt_path: Union[str, Path], device: Union[str, torch.device] = "cpu") -> Any:
+    """Fast in-memory cache for PyTorch checkpoints to accelerate inference throughput."""
+    resolved_path = str(Path(ckpt_path).resolve())
+    dev_str = str(device)
+    cache_key = f"{resolved_path}_{dev_str}"
+    if cache_key not in _MODEL_CHECKPOINT_CACHE:
+        _MODEL_CHECKPOINT_CACHE[cache_key] = torch.load(resolved_path, map_location=device, weights_only=False)
+    return _MODEL_CHECKPOINT_CACHE[cache_key]
+
 DEFAULT_STAC_CLOUD_COVER = 20.0
 
 
@@ -674,7 +687,7 @@ class VoxelPipeline:
             return None, "unavailable", str(ckpt_path_obj), [f"Model checkpoint file not found at: {ckpt_path_obj}"]
 
         try:
-            ckpt = torch.load(ckpt_path_obj, map_location=self.device, weights_only=False)
+            ckpt = get_cached_checkpoint(ckpt_path_obj, self.device)
         except Exception as e:
             return None, "unavailable", str(ckpt_path_obj), [f"Failed to load checkpoint file: {e}"]
 
@@ -1093,7 +1106,7 @@ class VoxelPipeline:
 
         if target_ckpt and Path(target_ckpt).exists():
             try:
-                ckpt_meta = torch.load(Path(target_ckpt), map_location="cpu", weights_only=False)
+                ckpt_meta = get_cached_checkpoint(Path(target_ckpt), "cpu")
                 ckpt_mask_raw = ckpt_meta.get("band_mask")
                 if ckpt_mask_raw is not None:
                     ckpt_trained_indices = [

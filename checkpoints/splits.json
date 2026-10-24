@@ -1,0 +1,52 @@
+{
+  "train_paths": [
+    "tiles_tif/tile_020.tif",
+    "tiles_tif/tile_021.tif",
+    "tiles_tif/tile_022.tif",
+    "tiles_tif/tile_023.tif",
+    "tiles_tif/tile_024.tif",
+    "tiles_tif/tile_025.tif",
+    "tiles_tif/tile_026.tif",
+    "tiles_tif/tile_027.tif",
+    "tiles_tif/tile_028.tif",
+    "tiles_tif/tile_029.tif",
+    "tiles_tif/tile_030.tif",
+    "tiles_tif/tile_031.tif",
+    "tiles_tif/tile_032.tif",
+    "tiles_tif/tile_033.tif",
+    "tiles_tif/tile_034.tif",
+    "tiles_tif/tile_035.tif",
+    "tiles_tif/tile_036.tif",
+    "tiles_tif/tile_037.tif",
+    "tiles_tif/tile_038.tif",
+    "tiles_tif/tile_039.tif"
+  ],
+  "val_paths": [
+    "tiles_npy/tile_000.npy",
+    "tiles_npy/tile_001.npy",
+    "tiles_npy/tile_002.npy",
+    "tiles_npy/tile_003.npy",
+    "tiles_npy/tile_004.npy",
+    "tiles_npy/tile_005.npy",
+    "tiles_npy/tile_006.npy",
+    "tiles_npy/tile_007.npy",
+    "tiles_npy/tile_008.npy",
+    "tiles_npy/tile_009.npy"
+  ],
+  "test_paths": [
+    "tiles_npy/tile_010.npy",
+    "tiles_npy/tile_011.npy",
+    "tiles_npy/tile_012.npy",
+    "tiles_npy/tile_013.npy",
+    "tiles_npy/tile_014.npy",
+    "tiles_npy/tile_015.npy",
+    "tiles_npy/tile_016.npy",
+    "tiles_npy/tile_017.npy",
+    "tiles_npy/tile_018.npy",
+    "tiles_npy/tile_019.npy"
+  ],
+  "train_count": 20,
+  "val_count": 10,
+  "test_count": 10,
+  "seed": 42
+}
